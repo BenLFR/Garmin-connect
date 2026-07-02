@@ -111,8 +111,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env copy
 .envrc
 .venv
+.venv.venv/
 env/
 venv/
 ENV/
@@ -139,3 +141,13 @@ dmypy.json
 
 # Ignore folder for local testing
 ignore/
+
+# Personal activity exports
+*.gpx
+*.tcx
+*.fit
+Brumath*
+Nouveau document texte.txt
+
+# Separate mobile app (not part of this package)
+mobile/
