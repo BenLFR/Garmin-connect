@@ -151,3 +151,10 @@ Nouveau document texte.txt
 
 # Separate mobile app (not part of this package)
 mobile/
+
+# FitQuest build & local state
+fitquest/webapp/node_modules/
+fitquest/webapp/dist/
+fitquest/server/data/
+fitquest/**/__pycache__/
+fitquest/**/.pytest_cache/
