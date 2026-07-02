@@ -10,8 +10,15 @@ this module is exercised manually, not in CI.
 
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Dict, List
+
+# The garminconnect package lives at the repo root (not pip-installed in dev)
+_REPO_ROOT = str(Path(__file__).resolve().parents[3])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # Type keys we normalise Garmin's typeKey values into (engine vocabulary)
 _TYPE_MAP = {
@@ -44,11 +51,13 @@ def _norm_type(raw: Dict[str, Any]) -> str:
 
 
 class GarminProvider:
-    def __init__(self, tokenstore: str = "~/.garminconnect") -> None:
+    def __init__(self, tokenstore: str | None = None) -> None:
+        import os
+
         from garminconnect import Garmin  # local package, lazy import
 
         self.api = Garmin()
-        self.api.login(tokenstore)
+        self.api.login(tokenstore or os.getenv("GARMINTOKENS", "~/.garminconnect"))
 
     # -- history ------------------------------------------------------------
 

@@ -31,9 +31,19 @@ vers `:8000`).
 
 - **Démo** (défaut) : historique simulé de 4 semaines, aucun compte requis.
   Le CTA « Simuler une séance » alimente la boucle de jeu.
-- **Garmin réel** : utilise la lib `garminconnect` de ce repo. Générer d'abord
-  les tokens avec `example.py` (racine du repo), puis choisir « Connecter
-  Garmin » à l'onboarding.
+- **Garmin réel** : utilise la lib `garminconnect` de ce repo.
+
+  ```bash
+  pip install garth requests            # deps de la lib
+  cd server && python garmin_login.py   # login (+ MFA), tokens ~1 an,
+                                        # et rapport de couverture des champs
+  uvicorn main:app --port 8000          # puis « Connecter Garmin » à l'onboarding
+  ```
+
+  Les tokens vont dans `$GARMINTOKENS` (défaut `~/.garminconnect`) ; aucun mot
+  de passe n'est stocké. NB : `sso.garmin.com` et `connectapi.garmin.com`
+  doivent être joignables (bloqués par défaut par la politique réseau des
+  environnements Claude Code web).
 
 ## Tests
 
