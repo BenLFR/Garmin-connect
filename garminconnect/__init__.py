@@ -7,7 +7,6 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional
 
 import garth
-from withings_sync import fit
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +349,10 @@ class Garmin:
         visceral_fat_rating: Optional[float] = None,
         bmi: Optional[float] = None,
     ):
+        # Lazy import: withings-sync is only needed for weight upload,
+        # don't make the whole package depend on it at import time.
+        from withings_sync import fit
+
         dt = datetime.fromisoformat(timestamp) if timestamp else datetime.now()
         fitEncoder = fit.FitEncoderWeight()
         fitEncoder.write_file_info()
