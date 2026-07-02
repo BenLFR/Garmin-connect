@@ -79,11 +79,24 @@ def simulate_new_activity(rng_seed: int | None = None) -> Dict[str, Any]:
     }
 
 
+def lnrmssd_series(days: int = 70, seed: int = 42) -> List[float]:
+    """Deterministic daily LnRMSSD series (oldest first) for the SWC
+    methodology: stable baseline ~ln(65 ms) with physiological noise."""
+    rng = _seeded(seed)
+    base = 4.17  # ln(~65 ms)
+    series = []
+    for i in range(days):
+        # slow drift + daily noise, deterministic across calls
+        drift = 0.06 * (i / days)
+        series.append(round(base + drift + rng.gauss(0, 0.12), 3))
+    return series
+
+
 def demo_wellness(seed: int = 42) -> Dict[str, Any]:
-    """Daily wellness snapshot used for VITALITÉ and the readiness cap."""
+    """Daily wellness snapshot. Readiness is derived upstream from the SWC
+    status (engine.readiness_from_swc), not invented here."""
     rng = _seeded(seed + date.today().toordinal())
     return {
-        "readiness": rng.randint(55, 92),
         "hrvStatusScore": rng.randint(60, 95),
         "sleepScore": rng.randint(62, 94),
         "bodyBattery": rng.randint(50, 95),
@@ -91,7 +104,7 @@ def demo_wellness(seed: int = 42) -> Dict[str, Any]:
 
 
 def demo_metrics(history: List[Dict[str, Any]], wellness: Dict[str, Any],
-                 streak_days: int) -> Dict[str, Any]:
+                 week_streak: int) -> Dict[str, Any]:
     """Aggregate history into the character_sheet() input metrics."""
     weekly_min = sum(a["durationMinutes"] for a in history
                      if a["activityType"] not in ("strength_training", "hiit")) / 4
@@ -107,7 +120,7 @@ def demo_metrics(history: List[Dict[str, Any]], wellness: Dict[str, Any],
         "anaerobicTE": max((a["anaerobicTE"] for a in history), default=0),
         "hrvStatusScore": wellness["hrvStatusScore"],
         "sleepScore": wellness["sleepScore"],
-        "readiness": wellness["readiness"],
-        "streakDays": streak_days,
+        "readiness": wellness.get("readiness", 65),
+        "weekStreak": week_streak,
         "activeDaysPerWeek": active_days,
     }

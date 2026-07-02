@@ -47,8 +47,10 @@ export default function Quests({ state }) {
             label="PV" valueLabel={`${boss.hp.toLocaleString('fr-FR')} / ${boss.maxHp.toLocaleString('fr-FR')} (${hpPct}%)`} />
         </div>
         <p style={{ fontSize: 11, color: 'var(--ink-dim)', marginTop: 12 }}>
-          Ton Training Load = tes dégâts · activité de classe = coup critique ×1.2
-          · ta VITALITÉ amplifie tout.
+          Ton Training Load = tes dégâts · coup critique ×1.2 sur activité de classe
+          · ta VITALITÉ amplifie tout · <b style={{ color: 'var(--neon-streak)' }}>dégâts
+          plafonnés à 110 % de ta plus grosse séance du mois</b> : la constance tue
+          le boss, pas l'héroïsme.
         </p>
       </div>
 

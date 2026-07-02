@@ -2,10 +2,15 @@
 
 Run:  uvicorn main:app --port 8000   (from fitquest/server)
 Demo mode needs no Garmin account; mode=garmin uses saved Garth tokens.
+
+Game rules are the v2 science-based engine (see docs/AUDIT_SCIENTIFIQUE.md):
+process XP, weekly streaks, recovery XP on rest days, SWC-driven readiness,
+anti-spike damage cap on bosses.
 """
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +28,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Providers
 # ---------------------------------------------------------------------------
 
 
@@ -36,11 +41,27 @@ def _provider_history(mode: str) -> List[Dict[str, Any]]:
 
 
 def _provider_wellness(mode: str) -> Dict[str, Any]:
+    """Wellness snapshot + SWC vitality status + derived readiness."""
     if mode == "garmin":
         from game.garmin_provider import GarminProvider
 
-        return GarminProvider().wellness()
-    return demo_data.demo_wellness()
+        wellness = GarminProvider().wellness()
+        # Real HRV series wiring is a TODO; use the device readiness meanwhile
+        wellness["swc"] = {"status": "normal", "trend": None,
+                           "low": None, "high": None}
+        return wellness
+    wellness = demo_data.demo_wellness()
+    swc = engine.vitality_swc(demo_data.lnrmssd_series())
+    wellness["swc"] = swc
+    wellness["readiness"] = round(
+        engine.readiness_from_swc(swc["status"], wellness["sleepScore"])
+    )
+    return wellness
+
+
+# ---------------------------------------------------------------------------
+# State helpers
+# ---------------------------------------------------------------------------
 
 
 def _require_state() -> Dict[str, Any]:
@@ -53,10 +74,7 @@ def _require_state() -> Dict[str, Any]:
 
 
 def _ensure_phase2(st: Dict[str, Any]) -> bool:
-    """Lazy-init guild/world-boss/quest fields + apply NPC daily ticks.
-    Returns True when the state was mutated (caller persists)."""
-    from datetime import date
-
+    """Lazy-init guild/world-boss/quest fields + apply NPC daily ticks."""
     changed = False
     if "guild" not in st:
         st["guild"] = quests.spawn_guild(st["class"])
@@ -66,6 +84,7 @@ def _ensure_phase2(st: Dict[str, Any]) -> bool:
         changed = True
     st.setdefault("claimedQuests", {})
     st.setdefault("guildLog", [])
+    st.setdefault("restRewards", [])
 
     today = date.today().isoformat()
     last_tick = st.get("lastGuildTick")
@@ -95,12 +114,23 @@ def _avg_weekly_load(history: List[Dict[str, Any]]) -> float:
     return sum(a["trainingLoad"] for a in history) / 4 if history else 0.0
 
 
+def _week_streak(history: List[Dict[str, Any]]) -> int:
+    return engine.successful_week_streak(store.active_days_by_week(history))
+
+
+def _current_week_acts(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    monday = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+    return [a for a in history if a.get("startDate", "") >= monday]
+
+
 def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
     wellness = _provider_wellness(st["mode"])
-    metrics = demo_data.demo_metrics(st["history"], wellness, st["streakDays"])
+    week_streak = _week_streak(st["history"])
+    metrics = demo_data.demo_metrics(st["history"], wellness, week_streak)
     sheet = engine.character_sheet(metrics)
     level = engine.level_from_total_xp(st["totalXp"])
     cls = engine.CLASSES[st["class"]]
+    active_days = store.active_days_this_week(st["history"])
     return {
         "player": {
             "name": st["playerName"],
@@ -111,7 +141,12 @@ def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
             "mode": st["mode"],
         },
         "level": level,
-        "streakDays": st["streakDays"],
+        "weekStreak": week_streak,
+        "weekPattern": {
+            "activeDaysThisWeek": active_days,
+            "healthyMin": engine.HEALTHY_WEEK_MIN_DAYS,
+            "healthyMax": engine.HEALTHY_WEEK_MAX_DAYS,
+        },
         "wellness": wellness,
         "characterSheet": sheet,
         "boss": st["boss"],
@@ -148,10 +183,9 @@ class StartBody(BaseModel):
 
 @app.post("/api/onboarding/analyze")
 def onboarding_analyze(body: StartBody) -> Dict[str, Any]:
-    """S3 'scan': read 4 weeks of history, return the class reveal."""
     try:
         history = _provider_history(body.mode)
-    except Exception as exc:  # garmin auth/network failure → actionable error
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"garmin_error: {exc}")
     reco = engine.recommend_class(history)
     return {
@@ -176,23 +210,26 @@ def onboarding_choose(body: ChooseBody) -> Dict[str, Any]:
     if body.playerClass not in engine.CLASSES:
         raise HTTPException(status_code=400, detail="unknown_class")
     history = _provider_history(body.mode)
-    streak = store.streak_from_history(history)
-    wellness = _provider_wellness(body.mode)
 
-    # Backfill: your past counts. Grant XP for the analysed history so the
-    # player starts with momentum (Duolingo-style head start).
+    # Backfill: your past counts — process XP over the analysed history,
+    # replaying each week so the intensity-distribution guardrail applies.
     total_xp = 0
     seen_types: set = set()
-    for act in reversed(history):  # oldest first for novelty detection
+    week_acts: List[Dict[str, Any]] = []
+    current_week = None
+    for act in reversed(history):  # oldest first
+        act_week = quests.week_key(date.fromisoformat(act["startDate"]))
+        if act_week != current_week:
+            current_week, week_acts = act_week, []
         novelty = act["activityType"] not in seen_types
         seen_types.add(act["activityType"])
         bd = engine.xp_for_activity(
-            act["trainingLoad"], body.playerClass, act["activityType"],
-            streak_days=0, readiness=None, new_pr=act.get("isPR", False),
-            is_new_activity_type=novelty,
+            act, body.playerClass, week_activities=week_acts,
+            successful_weeks=0, readiness=None, is_new_activity_type=novelty,
         )
         act["xpBreakdown"] = bd.as_dict()
         total_xp += bd.xp
+        week_acts.append(act)
 
     level = engine.level_from_total_xp(total_xp)
     boss = engine.spawn_boss(level["level"], _avg_weekly_load(history))
@@ -201,7 +238,6 @@ def onboarding_choose(body: ChooseBody) -> Dict[str, Any]:
         "playerName": body.playerName.strip() or "Héros",
         "class": body.playerClass,
         "totalXp": total_xp,
-        "streakDays": streak,
         "history": history,
         "seenTypes": sorted(seen_types),
         "boss": boss.as_dict(),
@@ -241,35 +277,57 @@ def reset_profile() -> Dict[str, str]:
 
 @app.post("/api/sync")
 def sync() -> Dict[str, Any]:
-    """Pull (or simulate) the newest session, award XP, damage the boss."""
+    """Pull (or simulate) the newest session, award process XP, damage the
+    bosses (anti-spike capped), reward compliant rest days and quests."""
     st = _require_state()
     wellness = _provider_wellness(st["mode"])
+    readiness = wellness.get("readiness")
 
     if st["mode"] == "garmin":
         history = _provider_history("garmin")
         known = {a["activityId"] for a in st["history"]}
         fresh = [a for a in history if a["activityId"] not in known]
         if not fresh:
-            return {"newActivities": [], "state": _full_state_payload(st)}
+            return {"newActivities": [], "questRewards": [],
+                    "recoveryReward": None, "state": _full_state_payload(st)}
         new_acts = fresh
     else:
         new_acts = [demo_data.simulate_new_activity()]
 
     level_before = engine.level_from_total_xp(st["totalXp"])["level"]
-    metrics = demo_data.demo_metrics(st["history"], wellness, st["streakDays"])
+    week_streak = _week_streak(st["history"])
+    metrics = demo_data.demo_metrics(st["history"], wellness, week_streak)
     vitalite = engine.character_sheet(metrics)["vitalite"]
     quests_done_before = {q["id"] for q in _quests_payload(st) if q["done"]}
     div_bonus = quests.diversity_bonus(
         [st["class"]] + [m["class"] for m in st["guild"]["members"]]
     )
 
+    # Recovery XP: yesterday was a genuine rest day in an active week →
+    # rest is a rewarded play action (once per day).
+    recovery_reward = None
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    active_dates = {a.get("startDate") for a in st["history"]}
+    if (yesterday not in active_dates
+            and yesterday not in st["restRewards"]
+            and store.active_days_this_week(st["history"]) >= 1):
+        xp_rest = engine.recovery_xp_for_rest_day(
+            store.active_days_this_week(st["history"])
+        )
+        if xp_rest > 0:
+            st["totalXp"] += xp_rest
+            st["restRewards"] = (st["restRewards"] + [yesterday])[-30:]
+            recovery_reward = {"date": yesterday, "xp": xp_rest}
+
     events: List[Dict[str, Any]] = []
     for act in new_acts:
+        spike_cap = engine.anti_spike_cap(st["history"])
         novelty = act["activityType"] not in set(st.get("seenTypes", []))
         bd = engine.xp_for_activity(
-            act["trainingLoad"], st["class"], act["activityType"],
-            streak_days=st["streakDays"], readiness=wellness["readiness"],
-            new_pr=act.get("isPR", False), is_new_activity_type=novelty,
+            act, st["class"],
+            week_activities=_current_week_acts(st["history"]),
+            successful_weeks=week_streak, readiness=readiness,
+            is_new_activity_type=novelty,
         )
         act["xpBreakdown"] = bd.as_dict()
         st["totalXp"] += bd.xp
@@ -281,24 +339,27 @@ def sync() -> Dict[str, Any]:
             "max_hp": st["boss"]["maxHp"], "hp": st["boss"]["hp"],
             "reward_xp": st["boss"]["rewardXp"], "lore": st["boss"]["lore"],
         })
-        # Critical hit: an activity matching your class strikes ×1.2
         crit = engine.matches_class(st["class"], act["activityType"])
-        eff_load = act["trainingLoad"] * (1.2 if crit else 1.0)
-        dmg = engine.damage_boss(boss, eff_load, vitalite)
+        hit = engine.damage_boss(
+            boss, act["trainingLoad"] * (1.2 if crit else 1.0),
+            vitalite, spike_cap=spike_cap,
+        )
         boss_defeated = boss.hp <= 0
         if boss_defeated:
             st["totalXp"] += boss.reward_xp
             new_level = engine.level_from_total_xp(st["totalXp"])["level"]
-            next_boss = engine.spawn_boss(
+            st["boss"] = engine.spawn_boss(
                 new_level, _avg_weekly_load(st["history"][:30])
-            )
-            st["boss"] = next_boss.as_dict()
+            ).as_dict()
         else:
             st["boss"] = boss.as_dict()
 
-        # World boss: the whole party's damage counts, yours included
+        # World boss: same capped, vitality-scaled damage + guild bonus
+        effective = min(act["trainingLoad"], spike_cap) if spike_cap else act["trainingLoad"]
+        if crit:
+            effective *= 1.2
         wb = st["worldBoss"]
-        wb_dmg = round(eff_load * (0.75 + vitalite / 100 * 0.5) * div_bonus)
+        wb_dmg = round(effective * (0.75 + vitalite / 100 * 0.5) * div_bonus)
         wb["hp"] = max(0, wb["hp"] - wb_dmg)
         wb_defeated = wb["hp"] <= 0
         if wb_defeated:
@@ -310,7 +371,8 @@ def sync() -> Dict[str, Any]:
         events.append({
             "activity": act,
             "critical": crit,
-            "bossDamage": dmg,
+            "spikeCapped": hit["capped"],
+            "bossDamage": hit["damage"],
             "bossDefeated": boss_defeated,
             "bossRewardXp": boss.reward_xp if boss_defeated else 0,
             "worldBossDamage": wb_dmg,
@@ -329,20 +391,13 @@ def sync() -> Dict[str, Any]:
             quest_rewards.append({"label": q["label"], "rewardXp": q["rewardXp"]})
     st["claimedQuests"][wk] = sorted(claimed)
 
-    # streak upkeep
-    from datetime import date, timedelta
-    today = date.today().isoformat()
-    if st.get("lastSyncDate") != today:
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-        if st.get("lastSyncDate") == yesterday or st["streakDays"] == 0:
-            st["streakDays"] += 1
-        st["lastSyncDate"] = today
-
+    st["lastSyncDate"] = date.today().isoformat()
     level_after_info = engine.level_from_total_xp(st["totalXp"])
     store.save(st)
     return {
         "newActivities": events,
         "questRewards": quest_rewards,
+        "recoveryReward": recovery_reward,
         "levelBefore": level_before,
         "levelAfter": level_after_info["level"],
         "leveledUp": level_after_info["level"] > level_before,

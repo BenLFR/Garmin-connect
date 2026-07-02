@@ -4,7 +4,7 @@ import { StatRows } from '../components.jsx'
 import { HeroSprite } from '../sprites.jsx'
 
 export default function Hero({ state }) {
-  const { player, level, characterSheet, prCount, streakDays } = state
+  const { player, level, characterSheet, prCount, weekStreak } = state
   return (
     <div className="screen stack">
       <div className="px-panel" style={{ textAlign: 'center', paddingTop: 24 }}>
@@ -32,7 +32,7 @@ export default function Hero({ state }) {
         <h2 className="px" style={{ marginBottom: 12 }}>Hauts faits</h2>
         <div className="trophy-grid">
           <div className="trophy">🏆<div className="tcap">{prCount} records</div></div>
-          <div className="trophy">🔥<div className="tcap">streak {streakDays}j</div></div>
+          <div className="trophy">🔥<div className="tcap">{weekStreak} semaines</div></div>
           <div className="trophy">⭐<div className="tcap">niveau {level.level}</div></div>
         </div>
       </div>

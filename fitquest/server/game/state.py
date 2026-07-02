@@ -33,14 +33,26 @@ def reset() -> None:
         STATE_FILE.unlink()
 
 
-def streak_from_history(activities: List[Dict[str, Any]]) -> int:
-    """Consecutive active days counted back from today/yesterday."""
+def active_days_by_week(activities: List[Dict[str, Any]],
+                        weeks: int = 8) -> List[int]:
+    """Distinct active days per COMPLETED ISO week, most recent first.
+    The current (partial) week is excluded: it can't break a weekly streak
+    before it is over — the streak model must absorb life's variance."""
     days = {a.get("startDate") for a in activities if a.get("startDate")}
-    streak = 0
-    cursor = date.today()
-    if cursor.isoformat() not in days:
-        cursor -= timedelta(days=1)  # grace: today not trained *yet*
-    while cursor.isoformat() in days:
-        streak += 1
-        cursor -= timedelta(days=1)
-    return streak
+    this_monday = date.today() - timedelta(days=date.today().weekday())
+    out = []
+    for w in range(1, weeks + 1):
+        monday = this_monday - timedelta(weeks=w)
+        count = sum(
+            1 for d in range(7)
+            if (monday + timedelta(days=d)).isoformat() in days
+        )
+        out.append(count)
+    return out
+
+
+def active_days_this_week(activities: List[Dict[str, Any]]) -> int:
+    days = {a.get("startDate") for a in activities if a.get("startDate")}
+    monday = date.today() - timedelta(days=date.today().weekday())
+    return sum(1 for d in range(7)
+               if (monday + timedelta(days=d)).isoformat() in days)

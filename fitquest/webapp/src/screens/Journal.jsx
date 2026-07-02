@@ -6,11 +6,11 @@ import { ACTIVITY_ICONS } from '../sprites.jsx'
 
 function XpDetail({ bd }) {
   if (!bd) return null
-  const parts = [`load ${bd.baseLoad}`]
+  const parts = [`${bd.baseMinutes} min ×2`]
   if (bd.classMultiplier > 1) parts.push(`classe ×${bd.classMultiplier}`)
-  if (bd.streakMultiplier > 1) parts.push(`streak ×${bd.streakMultiplier}`)
+  if (bd.weekStreakMultiplier > 1) parts.push(`semaines ×${bd.weekStreakMultiplier}`)
   if (bd.readinessCap < 1) parts.push(`fatigue ×${bd.readinessCap}`)
-  if (bd.prBonus > 0) parts.push(`record +${bd.prBonus}`)
+  if (bd.tidFactor < 1) parts.push(`budget intensité ×${bd.tidFactor}`)
   return <div className="xp-detail">{parts.join(' · ')}</div>
 }
 

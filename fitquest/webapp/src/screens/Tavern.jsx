@@ -4,10 +4,12 @@ import { SegBar, VitalChip } from '../components.jsx'
 import { HeroSprite, ACTIVITY_ICONS } from '../sprites.jsx'
 
 export default function Tavern({ state, lastEvent, onSync, syncing }) {
-  const { player, level, streakDays, wellness, boss } = state
+  const { player, level, weekStreak, weekPattern, wellness, boss } = state
   const readiness = wellness.readiness
   const readinessColor = readiness < 25 ? 'var(--neon-boss)' : readiness < 50 ? 'var(--neon-streak)' : 'var(--neon-vital)'
   const lastAct = lastEvent?.activity
+  const days = weekPattern.activeDaysThisWeek
+  const overTraining = days > weekPattern.healthyMax
 
   return (
     <div className="screen stack">
@@ -32,15 +34,25 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
       </div>
 
       <div className="vitals">
-        <VitalChip icon="🔥" num={streakDays} cap="streak" color="var(--neon-streak)" />
+        <VitalChip icon="🔥" num={weekStreak} cap="semaines" color="var(--neon-streak)" />
         <VitalChip icon="⚡" num={readiness} cap="énergie" color={readinessColor} />
         <VitalChip icon="😴" num={wellness.sleepScore} cap="sommeil" color="var(--neon-arc)" />
       </div>
 
+      <div className="px-panel" style={{ fontSize: 12, color: 'var(--ink-dim)' }}>
+        📅 <b style={{ color: overTraining ? 'var(--neon-boss)' : 'var(--ink)' }}>
+        {days} jour{days > 1 ? 's' : ''} actif{days > 1 ? 's' : ''} cette semaine</b>
+        {' '}(cible : {weekPattern.healthyMin}-{weekPattern.healthyMax} + repos).
+        {overTraining
+          ? ' Trop de jours sans repos : la semaine ne comptera pas dans ton streak — tes tendons se reconstruisent les jours off.'
+          : ' Les jours de repos rapportent de l’XP de récupération.'}
+      </div>
+
       {readiness < 50 && (
         <div className="px-panel" style={{ fontSize: 12, color: 'var(--ink-dim)' }}>
-          ⚠️ <b style={{ color: readinessColor }}>Énergie basse.</b> Ton corps réclame du repos :
-          l'XP est plafonnée à ×{readiness < 25 ? '0.3' : '0.7'} aujourd'hui. Récupérer, c'est jouer.
+          ⚠️ <b style={{ color: readinessColor }}>Énergie basse (HRV sous ta zone normale).</b>{' '}
+          L'XP est plafonnée à ×{readiness < 25 ? '0.3' : '0.7'} aujourd'hui.
+          Une séance facile en Z1 ou du repos te rendra plus fort. Récupérer, c'est jouer.
         </div>
       )}
 
@@ -62,7 +74,13 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
             <div className="xp-detail" style={{ marginTop: 8 }}>
               🗡️ {lastEvent.bossDamage} dégâts à {boss.name}
               {lastEvent.critical && <b style={{ color: 'var(--neon-boss)' }}> COUP CRITIQUE ×1.2 !</b>}
+              {lastEvent.spikeCapped && <b style={{ color: 'var(--neon-streak)' }}> (plafonnés — séance bien plus grosse que ton habitude)</b>}
               {lastEvent.bossDefeated && <b style={{ color: 'var(--gold)' }}> — BOSS VAINCU ! +{lastEvent.bossRewardXp} XP</b>}
+            </div>
+          )}
+          {lastEvent.recoveryReward && (
+            <div className="xp-detail" style={{ color: 'var(--neon-vital)' }}>
+              🌙 Jour de repos respecté hier : +{lastEvent.recoveryReward.xp} XP de récupération
             </div>
           )}
           {lastEvent.worldBossDamage > 0 && (

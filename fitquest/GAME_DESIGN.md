@@ -35,26 +35,33 @@ Choisies à la première connexion, **recommandées d'après l'historique Garmin
 **Règle clé** : la classe accélère l'XP dans son domaine (×1.5) mais l'XP hors-classe
 reste à ×1.0 — le cross-training n'est jamais puni.
 
-## 3. Le moteur d'XP
+## 3. Le moteur d'XP (v2 — validé par l'audit scientifique)
+
+> Révisé après audit contre la littérature : voir [`SCIENCE.md`](SCIENCE.md).
+> Principe : **récompenser le processus, pas le résultat** (objectifs de
+> processus : d = 1.36 vs 0.09 pour le résultat).
 
 Pour chaque activité synchronisée :
 
 ```
-xpBrute   = activityTrainingLoad            # charge physiologique Garmin
+base      = minutes d'activité × 2          # Z1 paie autant que Z3 à la minute
 mClasse   = activité colle à la classe ? 1.5 : 1.0
-mStreak   = 1 + min(streakJours, 7) × 0.05  # jusqu'à +35 % à 7 jours
-bonusPR   = nouveau record perso ? +200 XP flat : 0
-plafond   = readiness < 25 ? 0.3            # rouge → XP quasi coupée
-          : readiness < 50 ? 0.7
-          : 1.0
+mSemaines = 1 + min(semainesRéussies, 4) × 0.05   # streak HEBDO, cap +20 %
+plafond   = readiness (piloté par le SWC HRV) :
+            < 25 → 0.3 · < 50 → 0.7 · sinon 1.0
+budgetTID = séance intense ET > 20 % de minutes intenses cette semaine ? 0.6 : 1.0
 
-XP = round(xpBrute × mClasse × mStreak × plafond) + bonusPR
+XP = round(base × mClasse × mSemaines × plafond × budgetTID)
 ```
 
-Mécaniques qui sauvent le design :
+Et à côté de l'XP d'activité :
 
-- **Bonus PR perso** : le débutant bat ses records en permanence → flot d'XP au début.
-- **Plafond readiness** : impossible de "farmer" en se détruisant.
+- **XP de récupération** : un jour de repos dans une semaine active rapporte
+  +40 XP — le repos est une action de jeu, pas une punition.
+- **Records perso = trophées, zéro XP** : payer les PRs pousse aux efforts
+  max non planifiés.
+- **Budget d'intensité** : le HIIT reste efficace mais sa dose doit rester
+  ≈ 20 % du volume (modèles pyramidal/polarisé) — au-delà, l'XP est décotée.
 
 ## 4. Courbe de niveaux
 
@@ -99,11 +106,18 @@ Sport → sync Garmin → pull activités → calcul XP
   → au réveil : « Vitalité 82/100, prêt à en découdre »
 ```
 
-## 7. Les boss (phase 2)
+## 7. Les boss
 
-Un boss = défi **calibré sur les stats actuelles du joueur** (stretch atteignable,
-jamais absolu), avec une **barre de vie** entamée sur plusieurs séances (raid)
-ou en un gros run (fight final).
+Un boss = défi **calibré sur les stats actuelles du joueur** (jamais absolu),
+avec une **barre de vie** entamée sur plusieurs séances (raid). Deux règles
+de sécurité issues de l'audit :
+
+- **HP = 100 % d'une semaine type** (pas un stretch) : le défi est la
+  constance, pas le pic de volume.
+- **Plafond anti-spike** : les dégâts d'une séance sont plafonnés à 110 % de
+  la plus grosse séance des 30 derniers jours (les pics isolés de volume
+  augmentent le risque de blessure de 52-64 %, BJSM 2025). Aucune séance
+  héroïque ne tue un boss d'un coup.
 
 - Boss Rôdeur : « tiens la Z3 pendant 45 min » / « +10 % vs ta plus longue sortie du mois »
 - Boss Assassin : « nouveau PR sur 1 km » / « X watts pendant 30 s »

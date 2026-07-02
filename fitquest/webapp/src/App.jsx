@@ -30,7 +30,10 @@ export default function App() {
       const res = await api.sync()
       const ev = res.newActivities?.[0]
       if (ev) {
-        setLastEvent({ ...ev, questRewards: res.questRewards || [] })
+        setLastEvent({ ...ev, questRewards: res.questRewards || [], recoveryReward: res.recoveryReward })
+        if (res.recoveryReward) {
+          setTimeout(() => spawnFloat(`REPOS +${res.recoveryReward.xp} XP`, { x: 30, y: 56 }), 1100)
+        }
         spawnFloat(`+${ev.activity.xpBreakdown.xp} XP`, { x: 42, y: 38 })
         if (ev.bossDamage > 0) {
           const critTag = ev.critical ? ' CRIT!' : ''
