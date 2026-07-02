@@ -30,11 +30,14 @@ export default function App() {
       const res = await api.sync()
       const ev = res.newActivities?.[0]
       if (ev) {
-        setLastEvent(ev)
+        setLastEvent({ ...ev, questRewards: res.questRewards || [] })
         spawnFloat(`+${ev.activity.xpBreakdown.xp} XP`, { x: 42, y: 38 })
         if (ev.bossDamage > 0) {
-          setTimeout(() => spawnFloat(`-${ev.bossDamage} PV`, { dmg: true, x: 58, y: 30 }), 350)
+          const critTag = ev.critical ? ' CRIT!' : ''
+          setTimeout(() => spawnFloat(`-${ev.bossDamage} PV${critTag}`, { dmg: true, x: 58, y: 30 }), 350)
         }
+        ;(res.questRewards || []).forEach((qr, i) =>
+          setTimeout(() => spawnFloat(`QUÊTE +${qr.rewardXp} XP`, { x: 38, y: 50 }), 800 + i * 300))
       }
       setState(res.state)
       if (res.leveledUp) setTimeout(() => setLevelUp(res.levelAfter), 700)

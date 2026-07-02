@@ -52,6 +52,7 @@ fitquest/
 │   ├── main.py        API (onboarding, state, sync) + sert webapp/dist
 │   └── game/
 │       ├── engine.py          moteur : XP, niveaux, classes, reco, stats, boss
+│       ├── quests.py          défis hebdo, guilde, world boss (phase 2)
 │       ├── demo_data.py       provider démo (historique simulé)
 │       ├── garmin_provider.py provider réel (lib garminconnect)
 │       └── state.py           persistance JSON (MVP mono-joueur)

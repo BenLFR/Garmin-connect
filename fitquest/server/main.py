@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from game import demo_data, engine, state as store
+from game import demo_data, engine, quests, state as store
 
 app = FastAPI(title="FitQuest API")
 app.add_middleware(
@@ -47,7 +47,48 @@ def _require_state() -> Dict[str, Any]:
     st = store.load()
     if st is None:
         raise HTTPException(status_code=409, detail="onboarding_required")
+    if _ensure_phase2(st):
+        store.save(st)
     return st
+
+
+def _ensure_phase2(st: Dict[str, Any]) -> bool:
+    """Lazy-init guild/world-boss/quest fields + apply NPC daily ticks.
+    Returns True when the state was mutated (caller persists)."""
+    from datetime import date
+
+    changed = False
+    if "guild" not in st:
+        st["guild"] = quests.spawn_guild(st["class"])
+        changed = True
+    if "worldBoss" not in st:
+        st["worldBoss"] = quests.spawn_world_boss(_avg_weekly_load(st["history"]))
+        changed = True
+    st.setdefault("claimedQuests", {})
+    st.setdefault("guildLog", [])
+
+    today = date.today().isoformat()
+    last_tick = st.get("lastGuildTick")
+    if last_tick != today:
+        days = 1
+        if last_tick:
+            days = max((date.fromisoformat(today) - date.fromisoformat(last_tick)).days, 0)
+        hits = quests.npc_daily_damage(
+            st["guild"], days, _avg_weekly_load(st["history"]),
+            seed=date.today().toordinal(),
+        )
+        bonus = quests.diversity_bonus(
+            [st["class"]] + [m["class"] for m in st["guild"]["members"]]
+        )
+        wb = st["worldBoss"]
+        for h in hits:
+            dmg = round(h["damage"] * bonus)
+            wb["hp"] = max(0, wb["hp"] - dmg)
+            st["guildLog"] = ([{"name": h["name"], "damage": dmg, "date": today}]
+                              + st["guildLog"])[:12]
+        st["lastGuildTick"] = today
+        changed = True
+    return changed
 
 
 def _avg_weekly_load(history: List[Dict[str, Any]]) -> float:
@@ -75,7 +116,25 @@ def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
         "characterSheet": sheet,
         "boss": st["boss"],
         "prCount": sum(1 for a in st["history"] if a.get("isPR")),
+        "quests": _quests_payload(st),
+        "guild": {
+            **st["guild"],
+            "diversityBonus": quests.diversity_bonus(
+                [st["class"]] + [m["class"] for m in st["guild"]["members"]]
+            ),
+            "log": st.get("guildLog", [])[:6],
+        },
+        "worldBoss": st["worldBoss"],
     }
+
+
+def _quests_payload(st: Dict[str, Any]) -> List[Dict[str, Any]]:
+    wk = quests.week_key()
+    claimed = set(st.get("claimedQuests", {}).get(wk, []))
+    qs = quests.quest_progress(
+        quests.weekly_quests(st["class"]), st["history"], st["class"]
+    )
+    return [{**q, "claimed": q["id"] in claimed} for q in qs]
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +207,7 @@ def onboarding_choose(body: ChooseBody) -> Dict[str, Any]:
         "boss": boss.as_dict(),
         "lastSyncDate": None,
     }
+    _ensure_phase2(st)
     store.save(st)
     return _full_state_payload(st)
 
@@ -198,6 +258,10 @@ def sync() -> Dict[str, Any]:
     level_before = engine.level_from_total_xp(st["totalXp"])["level"]
     metrics = demo_data.demo_metrics(st["history"], wellness, st["streakDays"])
     vitalite = engine.character_sheet(metrics)["vitalite"]
+    quests_done_before = {q["id"] for q in _quests_payload(st) if q["done"]}
+    div_bonus = quests.diversity_bonus(
+        [st["class"]] + [m["class"] for m in st["guild"]["members"]]
+    )
 
     events: List[Dict[str, Any]] = []
     for act in new_acts:
@@ -217,7 +281,10 @@ def sync() -> Dict[str, Any]:
             "max_hp": st["boss"]["maxHp"], "hp": st["boss"]["hp"],
             "reward_xp": st["boss"]["rewardXp"], "lore": st["boss"]["lore"],
         })
-        dmg = engine.damage_boss(boss, act["trainingLoad"], vitalite)
+        # Critical hit: an activity matching your class strikes ×1.2
+        crit = engine.matches_class(st["class"], act["activityType"])
+        eff_load = act["trainingLoad"] * (1.2 if crit else 1.0)
+        dmg = engine.damage_boss(boss, eff_load, vitalite)
         boss_defeated = boss.hp <= 0
         if boss_defeated:
             st["totalXp"] += boss.reward_xp
@@ -229,12 +296,38 @@ def sync() -> Dict[str, Any]:
         else:
             st["boss"] = boss.as_dict()
 
+        # World boss: the whole party's damage counts, yours included
+        wb = st["worldBoss"]
+        wb_dmg = round(eff_load * (0.75 + vitalite / 100 * 0.5) * div_bonus)
+        wb["hp"] = max(0, wb["hp"] - wb_dmg)
+        wb_defeated = wb["hp"] <= 0
+        if wb_defeated:
+            st["totalXp"] += wb["rewardXp"]
+            st["worldBoss"] = quests.spawn_world_boss(
+                _avg_weekly_load(st["history"][:30]), tier=wb["tier"] + 1
+            )
+
         events.append({
             "activity": act,
+            "critical": crit,
             "bossDamage": dmg,
             "bossDefeated": boss_defeated,
             "bossRewardXp": boss.reward_xp if boss_defeated else 0,
+            "worldBossDamage": wb_dmg,
+            "worldBossDefeated": wb_defeated,
+            "worldBossRewardXp": wb["rewardXp"] if wb_defeated else 0,
         })
+
+    # Weekly quests: award newly completed ones
+    wk = quests.week_key()
+    claimed = set(st["claimedQuests"].get(wk, []))
+    quest_rewards: List[Dict[str, Any]] = []
+    for q in _quests_payload(st):
+        if q["done"] and q["id"] not in quests_done_before and q["id"] not in claimed:
+            st["totalXp"] += q["rewardXp"]
+            claimed.add(q["id"])
+            quest_rewards.append({"label": q["label"], "rewardXp": q["rewardXp"]})
+    st["claimedQuests"][wk] = sorted(claimed)
 
     # streak upkeep
     from datetime import date, timedelta
@@ -249,6 +342,7 @@ def sync() -> Dict[str, Any]:
     store.save(st)
     return {
         "newActivities": events,
+        "questRewards": quest_rewards,
         "levelBefore": level_before,
         "levelAfter": level_after_info["level"],
         "leveledUp": level_after_info["level"] > level_before,

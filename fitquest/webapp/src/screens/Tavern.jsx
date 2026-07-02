@@ -60,10 +60,22 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
           </div>
           {lastEvent.bossDamage > 0 && (
             <div className="xp-detail" style={{ marginTop: 8 }}>
-              🗡️ {lastEvent.bossDamage} dégâts infligés à {boss.name}
+              🗡️ {lastEvent.bossDamage} dégâts à {boss.name}
+              {lastEvent.critical && <b style={{ color: 'var(--neon-boss)' }}> COUP CRITIQUE ×1.2 !</b>}
               {lastEvent.bossDefeated && <b style={{ color: 'var(--gold)' }}> — BOSS VAINCU ! +{lastEvent.bossRewardXp} XP</b>}
             </div>
           )}
+          {lastEvent.worldBossDamage > 0 && (
+            <div className="xp-detail">
+              🐉 {lastEvent.worldBossDamage} dégâts au world boss (bonus de guilde inclus)
+              {lastEvent.worldBossDefeated && <b style={{ color: 'var(--gold)' }}> — RAID VICTORIEUX ! +{lastEvent.worldBossRewardXp} XP</b>}
+            </div>
+          )}
+          {(lastEvent.questRewards || []).map((qr) => (
+            <div className="xp-detail" key={qr.label} style={{ color: 'var(--gold)' }}>
+              📜 Quête accomplie : {qr.label} (+{qr.rewardXp} XP)
+            </div>
+          ))}
         </div>
       ) : (
         <div className="px-panel" style={{ fontSize: 13, color: 'var(--ink-dim)' }}>

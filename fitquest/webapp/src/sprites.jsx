@@ -39,6 +39,22 @@ const BOSS_MAP = [
   '................',
 ]
 
+// World boss — front-facing dragon with wings, fangs and glowing eyes
+const WORLD_BOSS_MAP = [
+  '.W..............W.',
+  '.WW....DDDD....WW.',
+  '.WWW..DDDDDD..WWW.',
+  '.WWWDDDDDDDDDDWWW.',
+  '..WWDDRDDDDRDDWW..',
+  '..WDDDDDDDDDDDDW..',
+  '...DDDDDDDDDDDD...',
+  '...DDDFFFFFFDDD...',
+  '....DDFFFFFFDD....',
+  '.....DDDDDDDD.....',
+  '....DD..DD..DD....',
+  '...DDD..DD..DDD...',
+]
+
 const SKIN = { S: '#e8b88a', E: '#101528' }
 
 export const PALETTES = {
@@ -48,6 +64,7 @@ export const PALETTES = {
   paladin: { H: '#4a3a94', C: '#372a73', B: '#ffd166', L: '#292052', O: '#8f7bff', W: '#ffd166', ...SKIN },
   voyageur: { H: '#8f6b1d', C: '#6e5216', B: '#ffd166', L: '#41320e', O: '#ffd166', W: '#3ee6c1', ...SKIN },
   boss: { G: '#7e3050', R: '#ff4d8f' },
+  worldBoss: { D: '#6b2447', R: '#ff4d8f', F: '#c96a8e', W: '#4a3a94' },
 }
 
 export function PixelSprite({ map = HERO_MAP, palette, size = 96, idle = true, halo }) {
@@ -81,6 +98,10 @@ export function HeroSprite({ playerClass, size = 96, idle = true, halo }) {
 
 export function BossSprite({ size = 112, idle = true }) {
   return <PixelSprite map={BOSS_MAP} palette={PALETTES.boss} size={size} idle={idle} halo="rgba(255,77,143,0.4)" />
+}
+
+export function WorldBossSprite({ size = 160, idle = true }) {
+  return <PixelSprite map={WORLD_BOSS_MAP} palette={PALETTES.worldBoss} size={size} idle={idle} halo="rgba(143,123,255,0.45)" />
 }
 
 export const ACTIVITY_ICONS = {

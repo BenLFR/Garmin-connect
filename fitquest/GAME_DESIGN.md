@@ -129,6 +129,12 @@ persistent, le classement compétitif reset. Personne n'est distancé pour toujo
 - ✅ Moteur XP complet (formule ci-dessus) + niveaux.
 - ✅ Feuille de personnage 5 stats.
 - ✅ Dashboard : XP bar animée, streak, readiness, feed d'activités avec détail du calcul.
-- ✅ Boss de palier (v1 : défi hebdo calibré avec barre de vie alimentée par le load).
+- ✅ Boss de palier (barre de vie calibrée, coup critique ×1.2 sur activité de classe).
 - ✅ Popup LEVEL UP animée.
-- 🔜 Guildes, world boss, saisons.
+- ✅ **Phase 2 (livrée)** — Défis hebdo : 3 quêtes à rotation le lundi, dont une
+  taillée pour la classe, récompensées à la sync. Guilde « party mixte » avec
+  bonus de diversité (+5 %/classe distincte, cap +20 %) et **world boss** à
+  barre de vie collective ; en mode démo la party est simulée par des
+  compagnons PNJ qui infligent leurs dégâts quotidiens — les formes de données
+  sont le contrat du vrai multijoueur.
+- 🔜 Multijoueur réel (guildes persistantes), saisons, respec de classe.
