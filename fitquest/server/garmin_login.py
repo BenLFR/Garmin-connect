@@ -116,10 +116,19 @@ if __name__ == "__main__":
     try:
         api = login()
     except Exception as exc:
-        print(f"\n✗ Échec de connexion : {exc}")
-        print("  Vérifie tes identifiants ; si le réseau passe par un proxy "
-              "d'entreprise, sso.garmin.com et connectapi.garmin.com doivent "
-              "être autorisés.")
+        msg = str(exc)
+        print(f"\n✗ Échec de connexion : {msg}")
+        if "429" in msg or "Too Many Requests" in msg:
+            print("  → Garmin rate-limite ton IP (protection anti-bruteforce).")
+            print("    Ce n'est PAS un problème d'identifiants. Attends 30-60 min")
+            print("    sans réessayer, ou relance depuis une autre IP (partage de")
+            print("    connexion 4G). Les tokens créés seront valables ~1 an.")
+        elif "401" in msg or "Unauthorized" in msg:
+            print("  → Identifiants refusés : vérifie l'email et le mot de passe.")
+        else:
+            print("  Vérifie tes identifiants ; si le réseau passe par un proxy "
+                  "d'entreprise, sso.garmin.com et connectapi.garmin.com doivent "
+                  "être autorisés.")
         sys.exit(1)
     ok = field_coverage_report(api)
     print("\n" + ("✓ Tout est prêt : lance l'app (uvicorn main:app --port 8000) "
