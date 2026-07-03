@@ -141,6 +141,7 @@ export function RollingNumber({ target, duration = 900 }) {
 const TABS = [
   { id: 'tavern', icon: '🍺', label: 'TAVERNE' },
   { id: 'hero', icon: '🛡️', label: 'HÉROS' },
+  { id: 'map', icon: '🗺️', label: 'CARTE' },
   { id: 'quests', icon: '🐉', label: 'QUÊTES' },
   { id: 'journal', icon: '📜', label: 'JOURNAL' },
 ]

@@ -81,8 +81,33 @@ class GarminProvider:
                 "aerobicTE": float(a.get("aerobicTrainingEffect") or 0),
                 "anaerobicTE": float(a.get("anaerobicTrainingEffect") or 0),
                 "isPR": bool(a.get("pr") or False),
+                "startLatitude": a.get("startLatitude"),
+                "startLongitude": a.get("startLongitude"),
+                "hasPolyline": bool(a.get("hasPolyline")),
             })
         return acts
+
+    def activity_polyline(self, activity_id: Any) -> Optional[List[tuple]]:
+        """Full GPS track of one activity as [(lat, lon), ...], or None.
+
+        One details call per activity, ever — the caller caches results
+        (including failures) in the geo cache to respect rate limits.
+        """
+        from . import geo
+
+        details = self.api.get_activity_details(
+            activity_id, maxchart=100, maxpoly=4000
+        )
+        dto = ((details or {}).get("geoPolylineDTO")
+               or (details or {}).get("polylineMap") or {})
+        encoded = dto.get("polyline")
+        if isinstance(encoded, str) and encoded:
+            return geo.decode_polyline(encoded)
+        if isinstance(encoded, list) and encoded:
+            points = [(p.get("lat"), p.get("lon")) for p in encoded
+                      if p.get("lat") is not None and p.get("lon") is not None]
+            return points or None
+        return None
 
     # -- wellness -----------------------------------------------------------
 

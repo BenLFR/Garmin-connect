@@ -32,6 +32,14 @@ GENERIC_QUESTS = [
     ("g_pr", "Gloire éternelle — bats un record personnel", "pr", 1, 250),
 ]
 
+# Geo quests (world map): metric new_hexes = hexes first revealed this week.
+# Appended as a 4th quest when the map has data — kept out of GENERIC_QUESTS
+# so the historical Random(week_key) draws stay unchanged.
+GEO_QUESTS = [
+    ("q_geo5", "Cartographe — révèle 5 nouveaux hexagones", "new_hexes", 5, 200),
+    ("q_geo10", "Grand arpenteur — révèle 10 nouveaux hexagones", "new_hexes", 10, 260),
+]
+
 # Class-flavored: metric class_minutes = minutes on class-matching activities
 CLASS_QUESTS = {
     "rodeur": ("c_rodeur", "Sentier du Rôdeur — 120 min d'aérobie", "class_minutes", 120, 200),
@@ -54,21 +62,29 @@ def _week_bounds(d: Optional[date] = None) -> tuple[str, str]:
     return monday.isoformat(), (monday + timedelta(days=6)).isoformat()
 
 
-def weekly_quests(player_class: str, d: Optional[date] = None) -> List[Dict[str, Any]]:
-    """3 quests: 2 generic (rotating deterministically) + 1 class quest."""
+def weekly_quests(player_class: str, d: Optional[date] = None,
+                  with_geo: bool = False) -> List[Dict[str, Any]]:
+    """3 quests: 2 generic (rotating deterministically) + 1 class quest,
+    plus 1 geo quest when the world map has data (with_geo)."""
     rng = random.Random(week_key(d))
     generic = rng.sample(GENERIC_QUESTS, 2)
     cls = CLASS_QUESTS.get(player_class, CLASS_QUESTS["voyageur"])
+    picked = [*generic, cls]
+    if with_geo:
+        picked.append(rng.choice(GEO_QUESTS))
     out = []
-    for qid, label, metric, target, reward in [*generic, cls]:
+    for qid, label, metric, target, reward in picked:
         out.append({"id": qid, "label": label, "metric": metric,
                     "target": target, "rewardXp": reward})
     return out
 
 
 def quest_progress(quests: List[Dict[str, Any]], history: List[Dict[str, Any]],
-                   player_class: str, d: Optional[date] = None) -> List[Dict[str, Any]]:
-    """Annotate quests with current progress from this ISO week's activities."""
+                   player_class: str, d: Optional[date] = None,
+                   extra_values: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    """Annotate quests with current progress from this ISO week's activities.
+    Metrics the history can't answer (e.g. new_hexes from the geo cache)
+    are injected by the caller through extra_values."""
     start, end = _week_bounds(d)
     week_acts = [a for a in history if start <= a.get("startDate", "") <= end]
     class_acts = [a for a in week_acts
@@ -81,6 +97,7 @@ def quest_progress(quests: List[Dict[str, Any]], history: List[Dict[str, Any]],
         "class_minutes": sum(a["durationMinutes"] for a in class_acts),
         "class_types": len({a["activityType"] for a in week_acts}),
     }
+    values.update(extra_values or {})
     out = []
     for q in quests:
         progress = min(values.get(q["metric"], 0), q["target"])

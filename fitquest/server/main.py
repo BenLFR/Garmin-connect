@@ -19,7 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from game import cosmetics, demo_data, engine, quests, state as store
+from game import (cosmetics, demo_data, engine, geo, geo_cache, quests,
+                  state as store)
 
 app = FastAPI(title="FitQuest API")
 app.add_middleware(
@@ -191,10 +192,116 @@ def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
 def _quests_payload(st: Dict[str, Any]) -> List[Dict[str, Any]]:
     wk = quests.week_key()
     claimed = set(st.get("claimedQuests", {}).get(wk, []))
+    cache = geo_cache.load()
+    with_geo = bool(cache["hexes"])
+    extra = {"new_hexes": geo_cache.new_hexes_in_week(cache, wk)} if with_geo else None
     qs = quests.quest_progress(
-        quests.weekly_quests(st["class"]), st["history"], st["class"]
+        quests.weekly_quests(st["class"], with_geo=with_geo),
+        st["history"], st["class"], extra_values=extra,
     )
     return [{**q, "claimed": q["id"] in claimed} for q in qs]
+
+
+# ---------------------------------------------------------------------------
+# World map — geo ingestion (incremental, rate-limit capped) & payload
+# ---------------------------------------------------------------------------
+
+
+def _update_geo(st: Dict[str, Any], new_acts: Optional[List[Dict[str, Any]]] = None,
+                budget: int = 3) -> Dict[str, Any]:
+    """Ingest GPS tracks into the geo cache.
+
+    Demo mode: deterministic fake tracks, no network. Garmin mode: fetch
+    at most `budget` polylines per call (new activities at sync time,
+    historical backfill when the map is opened); failures are persisted
+    as noGps so nothing is ever re-fetched. A 429 aborts the batch
+    silently — the backfill resumes on a later call.
+    """
+    cache = geo_cache.load()
+
+    if st["mode"] != "garmin":
+        tracks = geo.demo_hexes(st["history"])
+        for act in sorted(st["history"], key=lambda a: a.get("startDate", "")):
+            key = str(act.get("activityId"))
+            if key in tracks and not geo_cache.has_activity(cache, key):
+                geo_cache.record_hexes(cache, key, tracks[key],
+                                       act.get("startDate", ""))
+        cache["origin"] = cache["origin"] or dict(geo.DEMO_ORIGIN)
+        geo_cache.save(cache)
+        return cache
+
+    candidates = new_acts if new_acts is not None else st["history"]
+    todo = [a for a in candidates
+            if not geo_cache.has_activity(cache, a.get("activityId"))]
+    if not todo:
+        return cache
+
+    provider = None
+    fetched = 0
+    for act in sorted(todo, key=lambda a: a.get("startDate", "")):
+        if fetched >= budget:
+            break
+        # Histories stored before the GPS mapping existed lack these keys:
+        # absent = unknown → probe the details; known-absent = skip for good.
+        if "hasPolyline" in act and not (
+                act.get("hasPolyline") or act.get("startLatitude") is not None):
+            geo_cache.mark_no_gps(cache, act.get("activityId"))
+            continue
+        if provider is None:
+            from game.garmin_provider import GarminProvider
+
+            provider = GarminProvider()
+        fetched += 1
+        try:
+            points = provider.activity_polyline(act.get("activityId"))
+        except Exception as exc:
+            if "429" in str(exc):
+                break  # rate-limited: abandon the batch, resume later
+            geo_cache.mark_no_gps(cache, act.get("activityId"))
+            continue
+        if not points:
+            geo_cache.mark_no_gps(cache, act.get("activityId"))
+            continue
+        if cache["origin"] is None:
+            cache["origin"] = {"lat": points[0][0], "lon": points[0][1]}
+        hexes = geo.hexes_for_track(points, cache["origin"])
+        geo_cache.record_hexes(cache, act.get("activityId"), hexes,
+                               act.get("startDate", ""))
+    geo_cache.save(cache)
+    return cache
+
+
+@app.get("/api/map")
+def get_map() -> Dict[str, Any]:
+    st = _require_state()
+    cache = _update_geo(st)  # backfill ≤3 tracks per open, honest & capped
+    wk = quests.week_key()
+    hexes = []
+    for key, cell in cache["hexes"].items():
+        q, r = (int(v) for v in key.split(","))
+        hexes.append({
+            "q": q, "r": r, "visits": cell["visits"],
+            "lastDate": cell["lastDate"],
+            "newThisWeek": quests.week_key(
+                date.fromisoformat(cell["firstDate"])) == wk,
+        })
+    pending = 0 if st["mode"] != "garmin" else sum(
+        1 for a in st["history"]
+        if not geo_cache.has_activity(cache, a.get("activityId"))
+        and ("hasPolyline" not in a  # pre-GPS-mapping history: unknown → probe
+             or a.get("hasPolyline") or a.get("startLatitude") is not None)
+    )
+    return {
+        "demo": st["mode"] != "garmin",
+        "hexRadiusM": geo.HEX_RADIUS_M,
+        "origin": cache["origin"],
+        "player": geo_cache.player_hex(cache),
+        "hexes": hexes,
+        "pendingActivities": pending,
+        "newHexesThisWeek": geo_cache.new_hexes_in_week(cache, wk),
+        "geoQuests": [q for q in _quests_payload(st)
+                      if q["metric"] == "new_hexes"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +454,7 @@ def get_activities() -> Dict[str, Any]:
 @app.post("/api/reset")
 def reset_profile() -> Dict[str, str]:
     store.reset()
+    geo_cache.reset()
     return {"status": "reset"}
 
 
@@ -476,6 +584,13 @@ def sync() -> Dict[str, Any]:
             claimed.add(q["id"])
             quest_rewards.append({"label": q["label"], "rewardXp": q["rewardXp"]})
     st["claimedQuests"][wk] = sorted(claimed)
+
+    # World map: ingest the GPS tracks of the freshly synced activities
+    # (small batches by construction, so the budget covers them all).
+    try:
+        _update_geo(st, new_acts=new_acts, budget=len(new_acts))
+    except Exception:
+        pass  # the map must never break the sync loop
 
     st["lastSyncDate"] = date.today().isoformat()
     level_after_info = engine.level_from_total_xp(st["totalXp"])

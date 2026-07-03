@@ -4,6 +4,7 @@ import { TabBar, LevelUpModal, useFloaters } from './components.jsx'
 import Onboarding from './screens/Onboarding.jsx'
 import Tavern from './screens/Tavern.jsx'
 import Hero from './screens/Hero.jsx'
+import WorldMap from './screens/WorldMap.jsx'
 import Quests from './screens/Quests.jsx'
 import Journal from './screens/Journal.jsx'
 
@@ -93,6 +94,7 @@ export default function App() {
     <div className="app-shell">
       {tab === 'tavern' && <Tavern state={state} lastEvent={lastEvent} onSync={handleSync} syncing={syncing} />}
       {tab === 'hero' && <Hero state={state} onState={setState} />}
+      {tab === 'map' && <WorldMap />}
       {tab === 'quests' && <Quests state={state} />}
       {tab === 'journal' && <Journal />}
       <TabBar active={tab} onChange={setTab} />

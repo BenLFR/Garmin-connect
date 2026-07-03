@@ -99,3 +99,24 @@ def test_npc_damage_accumulates_over_missed_days():
     assert none == []
     assert len(week) > 5  # 4 NPCs × ~4.5 j/7 ≈ 18 hits
     assert all(h["damage"] > 0 for h in week)
+
+
+# -- geo quests (world map) -----------------------------------------------------
+
+def test_geo_quest_appended_when_map_has_data():
+    without = quests.weekly_quests("rodeur")
+    with_geo = quests.weekly_quests("rodeur", with_geo=True)
+    assert len(without) == 3          # historical draws untouched
+    assert len(with_geo) == 4
+    assert with_geo[:3] == without    # the 3 originals are identical
+    assert with_geo[3]["metric"] == "new_hexes"
+
+
+def test_quest_progress_uses_extra_values():
+    geo_quest = {"id": "q_geo5", "label": "x", "metric": "new_hexes",
+                 "target": 5, "rewardXp": 200}
+    done = quests.quest_progress([geo_quest], [], "rodeur",
+                                 extra_values={"new_hexes": 7})
+    assert done[0]["progress"] == 5 and done[0]["done"] is True
+    idle = quests.quest_progress([geo_quest], [], "rodeur")
+    assert idle[0]["progress"] == 0 and idle[0]["done"] is False
