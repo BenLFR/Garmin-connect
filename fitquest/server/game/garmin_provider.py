@@ -10,6 +10,7 @@ this module is exercised manually, not in CI.
 
 from __future__ import annotations
 
+import math
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -120,3 +121,18 @@ class GarminProvider:
             "sleepScore": sleep_score if sleep_score is not None else 70,
             "bodyBattery": 70,
         }
+
+    def lnrmssd_series(self, days: int = 28) -> List[float]:
+        """Daily LnRMSSD values (oldest first) for engine.vitality_swc().
+
+        Uses each night's average RMSSD from the HRV daily summaries;
+        nights without a reading are simply absent from the series."""
+        end = date.today()
+        start = end - timedelta(days=days - 1)
+        data = self.api.get_hrv_data_by_date(start.isoformat(), end.isoformat())
+        summaries = (data or {}).get("hrvSummaries") or []
+        by_date = sorted(
+            (s.get("calendarDate", ""), s.get("lastNightAvg"))
+            for s in summaries
+        )
+        return [round(math.log(avg), 3) for _, avg in by_date if avg]

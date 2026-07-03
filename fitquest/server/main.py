@@ -45,10 +45,20 @@ def _provider_wellness(mode: str) -> Dict[str, Any]:
     if mode == "garmin":
         from game.garmin_provider import GarminProvider
 
-        wellness = GarminProvider().wellness()
-        # Real HRV series wiring is a TODO; use the device readiness meanwhile
-        wellness["swc"] = {"status": "normal", "trend": None,
-                           "low": None, "high": None}
+        provider = GarminProvider()
+        wellness = provider.wellness()
+        try:
+            series = provider.lnrmssd_series()
+        except Exception:
+            series = []
+        swc = engine.vitality_swc(series)
+        wellness["swc"] = swc
+        # With enough real HRV history, readiness is SWC-driven like in demo
+        # mode; otherwise keep the device readiness already in `wellness`.
+        if swc["trend"] is not None:
+            wellness["readiness"] = round(
+                engine.readiness_from_swc(swc["status"], wellness["sleepScore"])
+            )
         return wellness
     wellness = demo_data.demo_wellness()
     swc = engine.vitality_swc(demo_data.lnrmssd_series())

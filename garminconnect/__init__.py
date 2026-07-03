@@ -780,6 +780,14 @@ class Garmin:
 
         return self.connectapi(url)
 
+    def get_hrv_data_by_date(self, startdate: str, enddate: str) -> Dict[str, Any]:
+        """Return daily hrv summaries between startdate and enddate using format 'YYYY-MM-DD'."""
+
+        url = f"{self.garmin_connect_hrv_url}/daily/{startdate}/{enddate}"
+        logger.debug("Requesting Heart Rate Variability (hrv) daily summaries")
+
+        return self.connectapi(url)
+
     def get_training_readiness(self, cdate: str) -> Dict[str, Any]:
         """Return training readiness data for current user."""
 
