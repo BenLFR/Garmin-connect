@@ -4,7 +4,15 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { HeroSprite } from '../sprites.jsx'
 
-const STEPS = ['welcome', 'connect', 'scan', 'reveal', 'confirm']
+const STEPS = ['welcome', 'connect', 'garmin-login', 'scan', 'reveal', 'confirm']
+
+const AUTH_ERRORS = {
+  bad_credentials: 'Email ou mot de passe refusé par Garmin.',
+  bad_mfa_code: 'Code refusé — vérifie et réessaie.',
+  rate_limited: 'Garmin limite les tentatives : réessaie dans 20-30 minutes.',
+  no_pending_login: 'Session expirée — repars des identifiants.',
+  garmin_error: 'Garmin est injoignable pour le moment.',
+}
 
 export default function Onboarding({ onDone }) {
   const [step, setStep] = useState('welcome')
@@ -14,8 +22,59 @@ export default function Onboarding({ onDone }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaNeeded, setMfaNeeded] = useState(false)
+  const [authError, setAuthError] = useState(null)
 
   const stepIndex = STEPS.indexOf(step)
+
+  const connectGarmin = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { connected } = await api.garminStatus()
+      setBusy(false)
+      if (connected) return startScan('garmin')
+      setAuthError(null)
+      setMfaNeeded(false)
+      setStep('garmin-login')
+    } catch (e) {
+      setBusy(false)
+      setError(AUTH_ERRORS[e.message] || String(e.message || e))
+    }
+  }
+
+  const submitLogin = async () => {
+    setBusy(true)
+    setAuthError(null)
+    try {
+      const res = await api.garminLogin(email.trim(), password)
+      setPassword('')
+      setBusy(false)
+      if (res.status === 'mfa_required') return setMfaNeeded(true)
+      startScan('garmin')
+    } catch (e) {
+      setBusy(false)
+      setAuthError(AUTH_ERRORS[e.message] || String(e.message || e))
+      if (e.message === 'no_pending_login') setMfaNeeded(false)
+    }
+  }
+
+  const submitMfa = async () => {
+    setBusy(true)
+    setAuthError(null)
+    try {
+      await api.garminMfa(mfaCode)
+      setBusy(false)
+      startScan('garmin')
+    } catch (e) {
+      setBusy(false)
+      setAuthError(AUTH_ERRORS[e.message] || String(e.message || e))
+      if (e.message === 'no_pending_login') setMfaNeeded(false)
+    }
+  }
 
   const startScan = async (chosenMode) => {
     setMode(chosenMode)
@@ -79,9 +138,77 @@ export default function Onboarding({ onDone }) {
             </div>
           )}
           <div className="cta-zone">
-            <button className="px-btn" onClick={() => startScan('garmin')}>⌚ CONNECTER GARMIN</button>
+            <button className="px-btn" disabled={busy} onClick={connectGarmin}>⌚ CONNECTER GARMIN</button>
             <button className="px-btn ghost" onClick={() => startScan('demo')}>MODE DÉMO (SANS COMPTE)</button>
           </div>
+        </>
+      )}
+
+      {step === 'garmin-login' && (
+        <>
+          <h1 className="px" style={{ fontSize: 15, lineHeight: 1.8 }}>
+            {mfaNeeded ? 'Sceau de protection' : 'Pacte avec Garmin'}
+          </h1>
+          <p style={{ color: 'var(--ink-dim)', fontSize: 13, lineHeight: 1.6 }}>
+            {mfaNeeded
+              ? 'Garmin vient de t\'envoyer un code (email ou app). Saisis-le pour sceller le pacte.'
+              : 'Tes identifiants partent directement vers Garmin depuis ton propre serveur ' +
+                'et n\'y sont jamais stockés — seuls des jetons (~1 an) sont conservés.'}
+          </p>
+          {authError && (
+            <div className="px-panel" style={{ color: 'var(--neon-boss)', fontSize: 12 }}>
+              {authError}
+            </div>
+          )}
+          {!mfaNeeded ? (
+            <>
+              <input
+                type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email Garmin" autoComplete="username"
+                style={{
+                  background: 'var(--bg-panel)', border: 'none', color: 'var(--ink)',
+                  padding: '14px', fontFamily: 'var(--body)', fontSize: 14, width: '100%',
+                  textAlign: 'center', outline: 'none',
+                }}
+              />
+              <input
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mot de passe" autoComplete="current-password"
+                onKeyDown={(e) => { if (e.key === 'Enter' && email && password && !busy) submitLogin() }}
+                style={{
+                  background: 'var(--bg-panel)', border: 'none', color: 'var(--ink)',
+                  padding: '14px', fontFamily: 'var(--body)', fontSize: 14, width: '100%',
+                  textAlign: 'center', outline: 'none',
+                }}
+              />
+              <div className="cta-zone">
+                <button className="px-btn" disabled={busy || !email || !password} onClick={submitLogin}>
+                  {busy ? 'CONNEXION…' : 'SE CONNECTER'}
+                </button>
+                <button className="px-btn ghost" onClick={() => setStep('connect')}>← RETOUR</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <input
+                inputMode="numeric" value={mfaCode} maxLength={6}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="Code à 6 chiffres" autoComplete="one-time-code"
+                onKeyDown={(e) => { if (e.key === 'Enter' && mfaCode.length >= 6 && !busy) submitMfa() }}
+                style={{
+                  background: 'var(--bg-panel)', border: 'none', color: 'var(--ink)',
+                  padding: '14px', fontFamily: 'var(--px)', fontSize: 14, width: '100%',
+                  textAlign: 'center', outline: 'none', letterSpacing: 6,
+                }}
+              />
+              <div className="cta-zone">
+                <button className="px-btn" disabled={busy || mfaCode.length < 6} onClick={submitMfa}>
+                  {busy ? 'VÉRIFICATION…' : 'VALIDER LE CODE'}
+                </button>
+                <button className="px-btn ghost" onClick={() => setMfaNeeded(false)}>← IDENTIFIANTS</button>
+              </div>
+            </>
+          )}
         </>
       )}
 

@@ -195,6 +195,61 @@ def _quests_payload(st: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Garmin auth — in-app SSO login with two-step MFA
+# ---------------------------------------------------------------------------
+
+
+class GarminLoginBody(BaseModel):
+    email: str
+    password: str  # single use: forwarded to SSO, never logged or stored
+
+
+class GarminMfaBody(BaseModel):
+    code: str
+
+
+_AUTH_HTTP_CODES = {
+    "bad_credentials": 401,
+    "bad_mfa_code": 401,
+    "rate_limited": 429,
+    "no_pending_login": 409,
+    "garmin_error": 502,
+}
+
+
+def _auth_http_error(exc: "garmin_auth.AuthError") -> HTTPException:
+    return HTTPException(status_code=_AUTH_HTTP_CODES.get(exc.code, 502),
+                         detail=exc.code)
+
+
+@app.get("/api/garmin/status")
+def garmin_status() -> Dict[str, Any]:
+    from game import garmin_auth
+
+    return garmin_auth.token_status()
+
+
+@app.post("/api/garmin/login")
+def garmin_login(body: GarminLoginBody) -> Dict[str, str]:
+    from game import garmin_auth
+
+    try:
+        return garmin_auth.start_login(body.email, body.password)
+    except garmin_auth.AuthError as exc:
+        raise _auth_http_error(exc)
+
+
+@app.post("/api/garmin/mfa")
+def garmin_mfa(body: GarminMfaBody) -> Dict[str, str]:
+    from game import garmin_auth
+
+    try:
+        return garmin_auth.submit_mfa(body.code)
+    except garmin_auth.AuthError as exc:
+        raise _auth_http_error(exc)
+
+
+# ---------------------------------------------------------------------------
 # Onboarding
 # ---------------------------------------------------------------------------
 

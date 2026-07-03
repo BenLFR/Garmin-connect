@@ -1,4 +1,14 @@
-// Thin API client. 409 = onboarding required (no profile yet).
+// Thin API client. On game routes, 409 = onboarding required (no profile
+// yet); on the garmin auth routes 409 is a real error (no pending login).
+
+async function reqStrict(path, options) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || res.statusText)
+  return res.json()
+}
 
 async function req(path, options) {
   const res = await fetch(path, {
@@ -18,4 +28,8 @@ export const api = {
   sync: () => req('/api/sync', { method: 'POST' }),
   activities: () => req('/api/activities'),
   reset: () => req('/api/reset', { method: 'POST' }),
+  garminStatus: () => reqStrict('/api/garmin/status'),
+  garminLogin: (email, password) =>
+    reqStrict('/api/garmin/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  garminMfa: (code) => reqStrict('/api/garmin/mfa', { method: 'POST', body: JSON.stringify({ code }) }),
 }
