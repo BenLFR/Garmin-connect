@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from game import demo_data, engine, quests, state as store
+from game import cosmetics, demo_data, engine, quests, state as store
 
 app = FastAPI(title="FitQuest API")
 app.add_middleware(
@@ -95,6 +95,8 @@ def _ensure_phase2(st: Dict[str, Any]) -> bool:
     st.setdefault("claimedQuests", {})
     st.setdefault("guildLog", [])
     st.setdefault("restRewards", [])
+    st.setdefault("bossKills", 0)
+    st.setdefault("equipped", {slot: None for slot in cosmetics.SLOTS})
 
     today = date.today().isoformat()
     last_tick = st.get("lastGuildTick")
@@ -172,6 +174,7 @@ def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
         "wellness": wellness,
         "characterSheet": sheet,
         "boss": st["boss"],
+        "cosmetics": cosmetics.payload(st, level["level"]),
         "prCount": sum(1 for a in st["history"] if a.get("isPR")),
         "quests": _quests_payload(st),
         "guild": {
@@ -380,6 +383,11 @@ def sync() -> Dict[str, Any]:
         [st["class"]] + [m["class"] for m in st["guild"]["members"]]
     )
 
+    level_before_info = engine.level_from_total_xp(st["totalXp"])
+    unlocked_before = set(cosmetics.unlocked_ids(
+        cosmetics.player_counters(st, level_before_info["level"])
+    ))
+
     # Recovery XP: yesterday was a genuine rest day in an active week →
     # rest is a rewarded play action (once per day).
     recovery_reward = None
@@ -424,6 +432,7 @@ def sync() -> Dict[str, Any]:
         boss_defeated = boss.hp <= 0
         if boss_defeated:
             st["totalXp"] += boss.reward_xp
+            st["bossKills"] = st.get("bossKills", 0) + 1
             new_level = engine.level_from_total_xp(st["totalXp"])["level"]
             st["boss"] = engine.spawn_boss(
                 new_level, _avg_weekly_load(st["history"][:30])
@@ -470,16 +479,54 @@ def sync() -> Dict[str, Any]:
 
     st["lastSyncDate"] = date.today().isoformat()
     level_after_info = engine.level_from_total_xp(st["totalXp"])
+    new_cosmetics = [
+        {"id": item["id"], "slot": item["slot"], "name": item["name"]}
+        for item in cosmetics.ITEMS
+        if item["id"] not in unlocked_before and cosmetics.is_unlocked(
+            item, cosmetics.player_counters(st, level_after_info["level"])
+        )
+    ]
     store.save(st)
     return {
         "newActivities": events,
         "questRewards": quest_rewards,
         "recoveryReward": recovery_reward,
+        "newCosmetics": new_cosmetics,
         "levelBefore": level_before,
         "levelAfter": level_after_info["level"],
         "leveledUp": level_after_info["level"] > level_before,
         "state": _full_state_payload(st),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cosmetics — equip/unequip unlocked items
+# ---------------------------------------------------------------------------
+
+
+class EquipBody(BaseModel):
+    slot: str
+    itemId: Optional[str] = None  # None = unequip
+
+
+@app.post("/api/cosmetics/equip")
+def equip_cosmetic(body: EquipBody) -> Dict[str, Any]:
+    st = _require_state()
+    if body.slot not in cosmetics.SLOTS:
+        raise HTTPException(status_code=400, detail="unknown_slot")
+    if body.itemId is not None:
+        item = cosmetics.get_item(body.itemId)
+        if item is None:
+            raise HTTPException(status_code=400, detail="unknown_item")
+        if item["slot"] != body.slot:
+            raise HTTPException(status_code=400, detail="wrong_slot")
+        level = engine.level_from_total_xp(st["totalXp"])["level"]
+        if not cosmetics.is_unlocked(item, cosmetics.player_counters(st, level)):
+            raise HTTPException(status_code=403, detail="item_locked")
+    st.setdefault("equipped", {slot: None for slot in cosmetics.SLOTS})
+    st["equipped"][body.slot] = body.itemId
+    store.save(st)
+    return _full_state_payload(st)
 
 
 # ---------------------------------------------------------------------------

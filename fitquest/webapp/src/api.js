@@ -32,4 +32,6 @@ export const api = {
   garminLogin: (email, password) =>
     reqStrict('/api/garmin/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   garminMfa: (code) => reqStrict('/api/garmin/mfa', { method: 'POST', body: JSON.stringify({ code }) }),
+  equip: (slot, itemId) =>
+    reqStrict('/api/cosmetics/equip', { method: 'POST', body: JSON.stringify({ slot, itemId }) }),
 }

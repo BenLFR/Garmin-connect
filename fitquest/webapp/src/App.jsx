@@ -62,6 +62,8 @@ export default function App() {
         ;(res.questRewards || []).forEach((qr, i) =>
           setTimeout(() => spawnFloat(`QUÊTE +${qr.rewardXp} XP`, { x: 38, y: 50 }), 800 + i * 300))
       }
+      ;(res.newCosmetics || []).forEach((item, i) =>
+        setTimeout(() => spawnFloat(`🎁 ${item.name}`, { x: 34, y: 44 }), 1400 + i * 350))
       setState(res.state)
       if (res.leveledUp) setTimeout(() => setLevelUp(res.levelAfter), 700)
     } catch (e) {
@@ -90,7 +92,7 @@ export default function App() {
   return (
     <div className="app-shell">
       {tab === 'tavern' && <Tavern state={state} lastEvent={lastEvent} onSync={handleSync} syncing={syncing} />}
-      {tab === 'hero' && <Hero state={state} />}
+      {tab === 'hero' && <Hero state={state} onState={setState} />}
       {tab === 'quests' && <Quests state={state} />}
       {tab === 'journal' && <Journal />}
       <TabBar active={tab} onChange={setTab} />

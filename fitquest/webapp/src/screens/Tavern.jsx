@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { SegBar, VitalChip } from '../components.jsx'
 import { HeroSprite, ACTIVITY_ICONS } from '../sprites.jsx'
+import { equippedVisuals } from './Hero.jsx'
 
 function ReminderPanel() {
   const supported = typeof Notification !== 'undefined'
@@ -40,7 +41,8 @@ function ReminderPanel() {
 }
 
 export default function Tavern({ state, lastEvent, onSync, syncing }) {
-  const { player, level, weekStreak, weekPattern, wellness, boss, intensity, spikeGuard } = state
+  const { player, level, weekStreak, weekPattern, wellness, boss, intensity, spikeGuard, cosmetics } = state
+  const visuals = equippedVisuals(cosmetics)
   const readiness = wellness.readiness
   const readinessColor = readiness < 25 ? 'var(--neon-boss)' : readiness < 50 ? 'var(--neon-streak)' : 'var(--neon-vital)'
   const lastAct = lastEvent?.activity
@@ -50,9 +52,15 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
   return (
     <div className="screen stack">
       <header className="hero-header">
-        <HeroSprite playerClass={player.class} size={64} halo={`${player.classColor}55`} />
+        <HeroSprite
+          playerClass={player.class} size={64} gear={visuals.gear}
+          halo={visuals.haloColor ? `${visuals.haloColor}77` : `${player.classColor}55`}
+        />
         <div>
           <div className="hname">{player.name}</div>
+          {visuals.title && (
+            <div style={{ color: 'var(--gold)', fontSize: 10, letterSpacing: 1 }}>« {visuals.title} »</div>
+          )}
           <div className="hclass" style={{ color: player.classColor }}>{player.className} · {player.archetype}</div>
         </div>
         <div className="lvl-medal">
