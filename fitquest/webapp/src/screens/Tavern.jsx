@@ -3,6 +3,42 @@ import { useState } from 'react'
 import { SegBar, VitalChip } from '../components.jsx'
 import { HeroSprite, ACTIVITY_ICONS } from '../sprites.jsx'
 
+function ReminderPanel() {
+  const supported = typeof Notification !== 'undefined'
+  const [enabled, setEnabled] = useState(
+    () => supported && Notification.permission === 'granted' && localStorage.getItem('fq_notify') === '1'
+  )
+  if (!supported) return null
+  const enable = async () => {
+    const perm = await Notification.requestPermission()
+    if (perm === 'granted') {
+      localStorage.setItem('fq_notify', '1')
+      setEnabled(true)
+    }
+  }
+  const disable = () => {
+    localStorage.removeItem('fq_notify')
+    setEnabled(false)
+  }
+  return (
+    <div className="px-panel" style={{ fontSize: 11, color: 'var(--ink-dim)' }}>
+      {enabled ? (
+        <>🔔 <b style={{ color: 'var(--neon-vital)' }}>Rappel matinal activé.</b>{' '}
+          Ton énergie du jour s'affiche à l'ouverture de FitQuest.{' '}
+          <a onClick={disable} style={{ color: 'var(--ink-dim)', textDecoration: 'underline', cursor: 'pointer' }}>Désactiver</a></>
+      ) : (
+        <>
+          <a onClick={enable} style={{ color: 'var(--neon-xp)', textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}>
+            🔔 Activer le rappel matinal
+          </a>{' '}
+          — une notification locale avec ton énergie du jour, à l'ouverture de l'app
+          (pas de serveur de push ; sur iPhone : installe d'abord FitQuest sur l'écran d'accueil, iOS 16.4+).
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Tavern({ state, lastEvent, onSync, syncing }) {
   const { player, level, weekStreak, weekPattern, wellness, boss, intensity, spikeGuard } = state
   const readiness = wellness.readiness
@@ -126,6 +162,8 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
       <button className="px-btn" onClick={onSync} disabled={syncing}>
         {syncing ? 'SYNCHRONISATION…' : player.mode === 'demo' ? '⚔️ SIMULER UNE SÉANCE' : '⌚ SYNCHRONISER GARMIN'}
       </button>
+
+      <ReminderPanel />
     </div>
   )
 }

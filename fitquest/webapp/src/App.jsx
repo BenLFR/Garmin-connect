@@ -24,6 +24,26 @@ export default function App() {
 
   useEffect(() => { refresh().catch(console.error) }, [])
 
+  // Honest local reminder: once per day, on open, if the player enabled it.
+  // No push server — this fires only when the (installed) app is opened.
+  useEffect(() => {
+    const readiness = state?.wellness?.readiness
+    if (readiness == null) return
+    const today = new Date().toISOString().slice(0, 10)
+    if (localStorage.getItem('fq_notify') !== '1') return
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    if (localStorage.getItem('fq_notify_last') === today) return
+    localStorage.setItem('fq_notify_last', today)
+    const body = readiness < 50
+      ? `Énergie ${readiness}/100 — jour parfait pour du Z1 ou du repos (ça paie aussi).`
+      : `Énergie ${readiness}/100 — ton boss t'attend.`
+    navigator.serviceWorker?.ready
+      .then((reg) => reg.showNotification('FitQuest', {
+        body, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+      }))
+      .catch(() => {})
+  }, [state?.wellness?.readiness])
+
   const handleSync = async () => {
     setSyncing(true)
     try {
