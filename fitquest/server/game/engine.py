@@ -166,6 +166,22 @@ def tid_factor(activity: Dict[str, Any],
     return TID_DISCOUNT if intense / total > INTENSE_SHARE_TARGET else 1.0
 
 
+def intensity_budget(week_activities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Weekly intensity budget vs the ~20 % pyramidal target — the player-
+    facing view of the tid_factor guardrail (same inputs, no discount)."""
+    total = sum(a.get("durationMinutes", 0) or 0 for a in week_activities)
+    intense = sum(a.get("durationMinutes", 0) or 0 for a in week_activities
+                  if is_intense(a))
+    return {
+        "intenseMinutes": round(intense),
+        "totalMinutes": round(total),
+        "budgetMinutes": round(total * INTENSE_SHARE_TARGET),
+        "share": round(intense / total, 3) if total else 0.0,
+        "target": INTENSE_SHARE_TARGET,
+        "over": total > 0 and intense / total > INTENSE_SHARE_TARGET,
+    }
+
+
 def matches_class(player_class: str, activity_type: str,
                   is_new_activity_type: bool = False) -> bool:
     cls = CLASSES.get(player_class)

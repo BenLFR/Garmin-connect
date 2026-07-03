@@ -133,6 +133,16 @@ def _current_week_acts(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [a for a in history if a.get("startDate", "") >= monday]
 
 
+def _spike_guard(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Player-facing view of the anti-spike rule: the cap and the biggest
+    session it derives from (cap = 110 % of that session's load)."""
+    cap = engine.anti_spike_cap(history)
+    return {
+        "cap": cap,
+        "biggestSession": round(cap / 1.10, 1) if cap is not None else None,
+    }
+
+
 def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
     wellness = _provider_wellness(st["mode"])
     week_streak = _week_streak(st["history"])
@@ -157,6 +167,8 @@ def _full_state_payload(st: Dict[str, Any]) -> Dict[str, Any]:
             "healthyMin": engine.HEALTHY_WEEK_MIN_DAYS,
             "healthyMax": engine.HEALTHY_WEEK_MAX_DAYS,
         },
+        "intensity": engine.intensity_budget(_current_week_acts(st["history"])),
+        "spikeGuard": _spike_guard(st["history"]),
         "wellness": wellness,
         "characterSheet": sheet,
         "boss": st["boss"],

@@ -63,6 +63,28 @@ def test_intense_work_beyond_20pct_budget_is_discounted():
     assert over.tid_factor == engine.TID_DISCOUNT
 
 
+def test_intensity_budget_empty_week():
+    budget = engine.intensity_budget([])
+    assert budget["totalMinutes"] == 0
+    assert budget["over"] is False
+
+
+def test_intensity_budget_under_target():
+    week = [_act(100, anaerobic=0.3), _act(15, a_type="hiit", anaerobic=3.0)]
+    budget = engine.intensity_budget(week)
+    # 15/115 ≈ 13 % intense, budget = 20 % de 115 = 23 min
+    assert budget["intenseMinutes"] == 15
+    assert budget["budgetMinutes"] == 23
+    assert budget["over"] is False
+
+
+def test_intensity_budget_over_target():
+    week = [_act(30, anaerobic=0.3), _act(30, a_type="hiit", anaerobic=3.0)]
+    budget = engine.intensity_budget(week)
+    assert budget["share"] == 0.5
+    assert budget["over"] is True
+
+
 def test_easy_sessions_are_never_discounted():
     week = [_act(30, a_type="hiit", anaerobic=3.0)]
     bd = engine.xp_for_activity(_act(30, anaerobic=0.2), "rodeur",

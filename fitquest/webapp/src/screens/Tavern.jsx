@@ -4,7 +4,7 @@ import { SegBar, VitalChip } from '../components.jsx'
 import { HeroSprite, ACTIVITY_ICONS } from '../sprites.jsx'
 
 export default function Tavern({ state, lastEvent, onSync, syncing }) {
-  const { player, level, weekStreak, weekPattern, wellness, boss } = state
+  const { player, level, weekStreak, weekPattern, wellness, boss, intensity, spikeGuard } = state
   const readiness = wellness.readiness
   const readinessColor = readiness < 25 ? 'var(--neon-boss)' : readiness < 50 ? 'var(--neon-streak)' : 'var(--neon-vital)'
   const lastAct = lastEvent?.activity
@@ -47,6 +47,27 @@ export default function Tavern({ state, lastEvent, onSync, syncing }) {
           ? ' Trop de jours sans repos : la semaine ne comptera pas dans ton streak — tes tendons se reconstruisent les jours off.'
           : ' Les jours de repos rapportent de l’XP de récupération.'}
       </div>
+
+      {intensity && intensity.totalMinutes > 0 && (
+        <div className="px-panel">
+          <SegBar
+            value={intensity.intenseMinutes}
+            max={Math.max(intensity.budgetMinutes, intensity.intenseMinutes, 1)}
+            segments={16} thin
+            label="BUDGET D'INTENSITÉ"
+            valueLabel={`${intensity.intenseMinutes} / ${intensity.budgetMinutes} min`}
+            color={intensity.over ? 'var(--neon-boss)' : 'var(--neon-arc)'}
+          />
+          <div style={{ fontSize: 11, color: 'var(--ink-dim)', marginTop: 8 }}>
+            {intensity.over
+              ? `⚠️ Plus de ${Math.round(intensity.target * 100)} % de tes minutes en haute intensité : l'XP des séances intenses est réduite ×0.6. Le volume facile reconstruit le budget.`
+              : `~${Math.round(intensity.target * 100)} % de tes minutes hebdo peuvent être intenses à plein tarif — la structure pyramidale qui fait progresser.`}
+            {spikeGuard?.cap != null && (
+              <> {' '}🛡️ Plafond anti-spike : {Math.round(spikeGuard.cap)} de load max par séance (110 % de ta plus grosse sortie sur 30 j).</>
+            )}
+          </div>
+        </div>
+      )}
 
       {readiness < 50 && (
         <div className="px-panel" style={{ fontSize: 12, color: 'var(--ink-dim)' }}>
