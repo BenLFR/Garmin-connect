@@ -259,3 +259,45 @@ h2.px { font-family: var(--px); font-size: 12px; letter-spacing: 1px; color: var
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* -- World map (Leaflet) ---------------------------------------------------- */
+
+/* OSM tiles inverted into the Néon Grimoire dark palette */
+.grimoire-tiles {
+  filter: invert(1) hue-rotate(200deg) brightness(0.9) contrast(0.95) saturate(0.35);
+}
+
+.leaflet-container {
+  background: var(--bg-abyss);
+  font-family: var(--body);
+}
+
+.leaflet-control-attribution {
+  background: rgba(21, 26, 46, 0.85) !important;
+  color: var(--ink-dim) !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a { color: var(--neon-xp) !important; }
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--bg-raised);
+  color: var(--ink);
+  border-radius: 0;
+  box-shadow: 0 0 0 2px var(--bg-abyss), 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.seg-popup { font-size: 12px; line-height: 1.6; }
+
+.player-marker .player-dot {
+  width: 14px; height: 14px;
+  background: var(--neon-xp);
+  border: 3px solid var(--bg-abyss);
+  box-shadow: 0 0 12px var(--neon-xp);
+  animation: player-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes player-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 8px var(--neon-xp); }
+  50% { transform: scale(1.25); box-shadow: 0 0 18px var(--neon-xp); }
+}
+
+.map-hud { pointer-events: auto; }

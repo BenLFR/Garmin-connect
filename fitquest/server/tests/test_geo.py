@@ -118,3 +118,30 @@ def test_demo_hexes_deterministic_and_outdoor_only():
 def test_demo_tracks_form_a_connected_world():
     tracks = geo.demo_hexes(_hist())
     assert tracks["3"][0] == tuple(tracks["1"][-1])  # next starts where last ended
+
+
+# -- cache v2 migration -------------------------------------------------------------
+
+def test_old_cache_version_is_rebuilt(monkeypatch, tmp_path):
+    import json
+
+    f = tmp_path / "geo_cache.json"
+    f.write_text(json.dumps({"origin": {"lat": 1, "lon": 2},
+                             "activities": {"1": {"noGps": True}}, "hexes": {}}))
+    monkeypatch.setattr(geo_cache, "GEO_FILE", f)
+    cache = geo_cache.load()   # v1 (no version field) -> fresh v2
+    assert cache["activities"] == {} and cache["version"] == geo_cache.CACHE_VERSION
+
+
+def test_hex_to_latlon_roundtrip():
+    origin = {"lat": 59.24, "lon": 18.0}
+    lat, lon = geo.hex_to_latlon(4, -2, origin)
+    assert geo.xy_to_hex(*geo.to_xy(lat, lon, origin)) == (4, -2)
+
+
+def test_simplify_track_keeps_endpoints():
+    pts = [(float(i), float(i)) for i in range(500)]
+    out = geo.simplify_track(pts, max_points=50)
+    assert len(out) == 50
+    assert out[0] == pts[0] and out[-1] == pts[-1]
+    assert geo.simplify_track(pts[:10], max_points=50) == pts[:10]

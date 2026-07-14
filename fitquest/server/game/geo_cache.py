@@ -24,14 +24,22 @@ from .state import DATA_DIR
 
 GEO_FILE = DATA_DIR / "geo_cache.json"
 
+# v2 added simplified display tracks ("points") per activity. Older caches
+# lack them: cheapest correct migration is a rebuild — the capped backfill
+# re-ingests everything within a couple of map opens.
+CACHE_VERSION = 2
+
 
 def _empty() -> Dict[str, Any]:
-    return {"origin": None, "activities": {}, "hexes": {}}
+    return {"version": CACHE_VERSION, "origin": None,
+            "activities": {}, "hexes": {}}
 
 
 def load() -> Dict[str, Any]:
     if GEO_FILE.exists():
-        return json.loads(GEO_FILE.read_text())
+        cache = json.loads(GEO_FILE.read_text())
+        if cache.get("version") == CACHE_VERSION:
+            return cache
     return _empty()
 
 
@@ -54,13 +62,17 @@ def mark_no_gps(cache: Dict[str, Any], activity_id: Any) -> None:
 
 
 def record_hexes(cache: Dict[str, Any], activity_id: Any,
-                 hexes: List[Tuple[int, int]], date: str) -> None:
-    """Idempotent: an already-ingested activity is never double-counted."""
+                 hexes: List[Tuple[int, int]], date: str,
+                 points: Optional[List[Tuple[float, float]]] = None,
+                 name: str = "") -> None:
+    """Idempotent: an already-ingested activity is never double-counted.
+    `points` is the simplified (lat, lon) display track, when available."""
     key = str(activity_id)
     if key in cache["activities"]:
         return
     cache["activities"][key] = {"hexes": [list(h) for h in hexes],
-                                "date": date}
+                                "date": date, "name": name,
+                                "points": [list(p) for p in (points or [])]}
     distinct = {tuple(h) for h in hexes}
     for q, r in distinct:
         hkey = f"{q},{r}"

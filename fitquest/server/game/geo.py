@@ -123,6 +123,28 @@ def hexes_for_track(points: List[Tuple[float, float]],
     return out
 
 
+def hex_to_latlon(q: int, r: int,
+                  origin: Dict[str, float]) -> Tuple[float, float]:
+    """Centre of an axial hex back in (lat, lon) — inverse of the ingestion
+    projection, used to draw hex overlays on the real map."""
+    x, y = hex_to_xy(q, r)
+    lat = origin["lat"] + y / M_PER_DEG_LAT
+    lon = origin["lon"] + x / (M_PER_DEG_LAT * math.cos(math.radians(origin["lat"])))
+    return lat, lon
+
+
+def simplify_track(points: List[Tuple[float, float]],
+                   max_points: int = 80) -> List[Tuple[float, float]]:
+    """Uniform decimation for map display (keeps first & last point).
+    Good enough visually at running scales; keeps the cache tiny."""
+    if len(points) <= max_points:
+        return list(points)
+    step = (len(points) - 1) / (max_points - 1)
+    out = [points[round(i * step)] for i in range(max_points - 1)]
+    out.append(points[-1])
+    return out
+
+
 # -- Demo fallback ---------------------------------------------------------------
 
 DEMO_ORIGIN = {"lat": 48.8566, "lon": 2.3522}

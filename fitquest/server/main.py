@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from game import (cosmetics, demo_data, engine, geo, geo_cache, quests,
-                  state as store)
+                  segments, state as store)
 
 app = FastAPI(title="FitQuest API")
 app.add_middleware(
@@ -194,9 +194,17 @@ def _quests_payload(st: Dict[str, Any]) -> List[Dict[str, Any]]:
     claimed = set(st.get("claimedQuests", {}).get(wk, []))
     cache = geo_cache.load()
     with_geo = bool(cache["hexes"])
-    extra = {"new_hexes": geo_cache.new_hexes_in_week(cache, wk)} if with_geo else None
+    extra = None
+    segs: List[Dict[str, Any]] = []
+    if with_geo:
+        segs = segments.build_segments(cache)
+        extra = {
+            "new_hexes": geo_cache.new_hexes_in_week(cache, wk),
+            "segments_done": segments.completed_this_week(cache, segs, wk),
+        }
     qs = quests.quest_progress(
-        quests.weekly_quests(st["class"], with_geo=with_geo),
+        quests.weekly_quests(st["class"], with_geo=with_geo,
+                             with_segments=bool(segs)),
         st["history"], st["class"], extra_values=extra,
     )
     return [{**q, "claimed": q["id"] in claimed} for q in qs]
@@ -221,12 +229,18 @@ def _update_geo(st: Dict[str, Any], new_acts: Optional[List[Dict[str, Any]]] = N
 
     if st["mode"] != "garmin":
         tracks = geo.demo_hexes(st["history"])
+        cache["origin"] = cache["origin"] or dict(geo.DEMO_ORIGIN)
         for act in sorted(st["history"], key=lambda a: a.get("startDate", "")):
             key = str(act.get("activityId"))
             if key in tracks and not geo_cache.has_activity(cache, key):
+                points = geo.simplify_track(
+                    [geo.hex_to_latlon(q, r, cache["origin"])
+                     for q, r in tracks[key]]
+                )
                 geo_cache.record_hexes(cache, key, tracks[key],
-                                       act.get("startDate", ""))
-        cache["origin"] = cache["origin"] or dict(geo.DEMO_ORIGIN)
+                                       act.get("startDate", ""),
+                                       points=points,
+                                       name=act.get("activityName", ""))
         geo_cache.save(cache)
         return cache
 
@@ -266,7 +280,9 @@ def _update_geo(st: Dict[str, Any], new_acts: Optional[List[Dict[str, Any]]] = N
             cache["origin"] = {"lat": points[0][0], "lon": points[0][1]}
         hexes = geo.hexes_for_track(points, cache["origin"])
         geo_cache.record_hexes(cache, act.get("activityId"), hexes,
-                               act.get("startDate", ""))
+                               act.get("startDate", ""),
+                               points=geo.simplify_track(points),
+                               name=act.get("activityName", ""))
     geo_cache.save(cache)
     return cache
 
@@ -276,15 +292,29 @@ def get_map() -> Dict[str, Any]:
     st = _require_state()
     cache = _update_geo(st)  # backfill ≤3 tracks per open, honest & capped
     wk = quests.week_key()
+    origin = cache["origin"]
     hexes = []
     for key, cell in cache["hexes"].items():
         q, r = (int(v) for v in key.split(","))
+        lat, lon = geo.hex_to_latlon(q, r, origin) if origin else (None, None)
         hexes.append({
-            "q": q, "r": r, "visits": cell["visits"],
+            "q": q, "r": r, "lat": lat, "lon": lon,
+            "visits": cell["visits"],
             "lastDate": cell["lastDate"],
             "newThisWeek": quests.week_key(
                 date.fromisoformat(cell["firstDate"])) == wk,
         })
+    tracks = [
+        {"id": key, "name": entry.get("name", ""),
+         "date": entry.get("date", ""), "points": entry.get("points", [])}
+        for key, entry in cache["activities"].items()
+        if entry.get("points")
+    ]
+    tracks.sort(key=lambda t: t["date"])
+    player = None
+    if tracks and tracks[-1]["points"]:
+        lat, lon = tracks[-1]["points"][-1]
+        player = {"lat": lat, "lon": lon}
     pending = 0 if st["mode"] != "garmin" else sum(
         1 for a in st["history"]
         if not geo_cache.has_activity(cache, a.get("activityId"))
@@ -294,13 +324,15 @@ def get_map() -> Dict[str, Any]:
     return {
         "demo": st["mode"] != "garmin",
         "hexRadiusM": geo.HEX_RADIUS_M,
-        "origin": cache["origin"],
-        "player": geo_cache.player_hex(cache),
+        "origin": origin,
+        "player": player,
+        "tracks": tracks,
+        "segments": segments.payload(cache, wk),
         "hexes": hexes,
         "pendingActivities": pending,
         "newHexesThisWeek": geo_cache.new_hexes_in_week(cache, wk),
         "geoQuests": [q for q in _quests_payload(st)
-                      if q["metric"] == "new_hexes"],
+                      if q["metric"] in ("new_hexes", "segments_done")],
     }
 
 

@@ -40,6 +40,12 @@ GEO_QUESTS = [
     ("q_geo10", "Grand arpenteur — révèle 10 nouveaux hexagones", "new_hexes", 10, 260),
 ]
 
+# Segment quests join the geo pool once the player has re-runnable routes
+# (metric segments_done, injected from the geo cache like new_hexes).
+SEGMENT_QUESTS = [
+    ("q_seg1", "Sur tes traces — reparcours un itinéraire connu", "segments_done", 1, 220),
+]
+
 # Class-flavored: metric class_minutes = minutes on class-matching activities
 CLASS_QUESTS = {
     "rodeur": ("c_rodeur", "Sentier du Rôdeur — 120 min d'aérobie", "class_minutes", 120, 200),
@@ -63,15 +69,18 @@ def _week_bounds(d: Optional[date] = None) -> tuple[str, str]:
 
 
 def weekly_quests(player_class: str, d: Optional[date] = None,
-                  with_geo: bool = False) -> List[Dict[str, Any]]:
+                  with_geo: bool = False,
+                  with_segments: bool = False) -> List[Dict[str, Any]]:
     """3 quests: 2 generic (rotating deterministically) + 1 class quest,
-    plus 1 geo quest when the world map has data (with_geo)."""
+    plus 1 geo quest when the world map has data (with_geo); the geo pool
+    widens to segment quests once re-runnable routes exist."""
     rng = random.Random(week_key(d))
     generic = rng.sample(GENERIC_QUESTS, 2)
     cls = CLASS_QUESTS.get(player_class, CLASS_QUESTS["voyageur"])
     picked = [*generic, cls]
     if with_geo:
-        picked.append(rng.choice(GEO_QUESTS))
+        pool = GEO_QUESTS + (SEGMENT_QUESTS if with_segments else [])
+        picked.append(rng.choice(pool))
     out = []
     for qid, label, metric, target, reward in picked:
         out.append({"id": qid, "label": label, "metric": metric,
