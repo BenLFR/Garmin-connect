@@ -14,8 +14,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,6 +39,10 @@ def _provider_history(mode: str) -> List[Dict[str, Any]]:
         from game.garmin_provider import GarminProvider
 
         return GarminProvider().history()
+    if mode == "strava":
+        from game.strava_provider import StravaProvider
+
+        return StravaProvider().history()
     return demo_data.generate_history()
 
 
@@ -60,6 +65,14 @@ def _provider_wellness(mode: str) -> Dict[str, Any]:
             wellness["readiness"] = round(
                 engine.readiness_from_swc(swc["status"], wellness["sleepScore"])
             )
+        return wellness
+    if mode == "strava":
+        from game.strava_provider import StravaProvider
+
+        wellness = StravaProvider().wellness()
+        # Strava exposes no HRV series: neutral SWC, Garmin keeps the edge
+        wellness["swc"] = {"status": "normal", "trend": None,
+                           "low": None, "high": None}
         return wellness
     wellness = demo_data.demo_wellness()
     swc = engine.vitality_swc(demo_data.lnrmssd_series())
@@ -219,15 +232,15 @@ def _update_geo(st: Dict[str, Any], new_acts: Optional[List[Dict[str, Any]]] = N
                 budget: int = 3) -> Dict[str, Any]:
     """Ingest GPS tracks into the geo cache.
 
-    Demo mode: deterministic fake tracks, no network. Garmin mode: fetch
-    at most `budget` polylines per call (new activities at sync time,
-    historical backfill when the map is opened); failures are persisted
-    as noGps so nothing is ever re-fetched. A 429 aborts the batch
-    silently — the backfill resumes on a later call.
+    Demo mode: deterministic fake tracks, no network. Garmin/Strava
+    modes: fetch at most `budget` polylines per call (new activities at
+    sync time, historical backfill when the map is opened); failures are
+    persisted as noGps so nothing is ever re-fetched. A 429 aborts the
+    batch silently — the backfill resumes on a later call.
     """
     cache = geo_cache.load()
 
-    if st["mode"] != "garmin":
+    if st["mode"] == "demo":
         tracks = geo.demo_hexes(st["history"])
         cache["origin"] = cache["origin"] or dict(geo.DEMO_ORIGIN)
         for act in sorted(st["history"], key=lambda a: a.get("startDate", "")):
@@ -262,9 +275,14 @@ def _update_geo(st: Dict[str, Any], new_acts: Optional[List[Dict[str, Any]]] = N
             geo_cache.mark_no_gps(cache, act.get("activityId"))
             continue
         if provider is None:
-            from game.garmin_provider import GarminProvider
+            if st["mode"] == "strava":
+                from game.strava_provider import StravaProvider
 
-            provider = GarminProvider()
+                provider = StravaProvider()
+            else:
+                from game.garmin_provider import GarminProvider
+
+                provider = GarminProvider()
         fetched += 1
         try:
             points = provider.activity_polyline(act.get("activityId"))
@@ -315,14 +333,14 @@ def get_map() -> Dict[str, Any]:
     if tracks and tracks[-1]["points"]:
         lat, lon = tracks[-1]["points"][-1]
         player = {"lat": lat, "lon": lon}
-    pending = 0 if st["mode"] != "garmin" else sum(
+    pending = 0 if st["mode"] == "demo" else sum(
         1 for a in st["history"]
         if not geo_cache.has_activity(cache, a.get("activityId"))
         and ("hasPolyline" not in a  # pre-GPS-mapping history: unknown → probe
              or a.get("hasPolyline") or a.get("startLatitude") is not None)
     )
     return {
-        "demo": st["mode"] != "garmin",
+        "demo": st["mode"] == "demo",
         "hexRadiusM": geo.HEX_RADIUS_M,
         "origin": origin,
         "player": player,
@@ -392,12 +410,54 @@ def garmin_mfa(body: GarminMfaBody) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Strava auth — OAuth2 authorization-code flow against the local server
+# ---------------------------------------------------------------------------
+
+
+def _strava_redirect_uri(request: Request) -> str:
+    return str(request.base_url).rstrip("/") + "/api/strava/callback"
+
+
+@app.get("/api/strava/status")
+def strava_status() -> Dict[str, Any]:
+    from game import strava_auth
+
+    return strava_auth.status()
+
+
+@app.get("/api/strava/connect")
+def strava_connect(request: Request) -> RedirectResponse:
+    from game import strava_auth
+
+    try:
+        return RedirectResponse(
+            strava_auth.authorize_url(_strava_redirect_uri(request))
+        )
+    except strava_auth.StravaAuthError as exc:
+        raise HTTPException(status_code=503, detail=exc.code)
+
+
+@app.get("/api/strava/callback")
+def strava_callback(request: Request, code: str = "",
+                    error: str = "") -> RedirectResponse:
+    from game import strava_auth
+
+    if error or not code:
+        return RedirectResponse("/?strava=denied")
+    try:
+        strava_auth.exchange_code(code)
+    except strava_auth.StravaAuthError:
+        return RedirectResponse("/?strava=error")
+    return RedirectResponse("/?strava=connected")
+
+
+# ---------------------------------------------------------------------------
 # Onboarding
 # ---------------------------------------------------------------------------
 
 
 class StartBody(BaseModel):
-    mode: str = "demo"  # "demo" | "garmin"
+    mode: str = "demo"  # "demo" | "garmin" | "strava"
 
 
 @app.post("/api/onboarding/analyze")
@@ -503,8 +563,8 @@ def sync() -> Dict[str, Any]:
     wellness = _provider_wellness(st["mode"])
     readiness = wellness.get("readiness")
 
-    if st["mode"] == "garmin":
-        history = _provider_history("garmin")
+    if st["mode"] in ("garmin", "strava"):
+        history = _provider_history(st["mode"])
         known = {a["activityId"] for a in st["history"]}
         fresh = [a for a in history if a["activityId"] not in known]
         if not fresh:

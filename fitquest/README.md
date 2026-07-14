@@ -43,7 +43,22 @@ vers `:8000`).
   Les tokens vont dans `$GARMINTOKENS` (défaut `~/.garminconnect`) ; aucun mot
   de passe n'est stocké. NB : `sso.garmin.com` et `connectapi.garmin.com`
   doivent être joignables (bloqués par défaut par la politique réseau des
-  environnements Claude Code web).
+  environnements Claude Code web). Le login se fait aussi **dans l'app**
+  (onboarding → Connecter Garmin : email, mot de passe, code MFA).
+
+- **Strava** : pour tous ceux qui n'ont pas de Garmin (Apple Watch, Polar,
+  Suunto, Coros, ou juste un téléphone). Une fois : créer une app API sur
+  <https://www.strava.com/settings/api> (Authorization Callback Domain :
+  `localhost`), puis lancer le serveur avec les identifiants :
+
+  ```bash
+  STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... uvicorn main:app --port 8000
+  # (ou data/strava_app.json : {"clientId": ..., "clientSecret": ...})
+  ```
+
+  Onboarding → « Connecter Strava » → OAuth dans le navigateur → retour
+  automatique dans l'app. Limites assumées : pas de HRV/sommeil côté Strava
+  (Vitalité neutre) et le load utilise le Relative Effort ou un proxy TRIMP.
 
 ## Tests
 

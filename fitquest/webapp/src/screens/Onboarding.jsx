@@ -30,6 +30,40 @@ export default function Onboarding({ onDone }) {
 
   const stepIndex = STEPS.indexOf(step)
 
+  // Returning from the Strava OAuth redirect: resume the flow seamlessly
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const strava = params.get('strava')
+    if (!strava) return
+    window.history.replaceState({}, '', '/')
+    if (strava === 'connected') startScan('strava')
+    else {
+      setError(strava === 'denied'
+        ? 'Autorisation Strava refusée — réessaie ou choisis une autre porte.'
+        : 'Échange de jetons Strava impossible — réessaie.')
+      setStep('connect')
+    }
+  }, [])
+
+  const connectStrava = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { configured, connected } = await api.stravaStatus()
+      setBusy(false)
+      if (connected) return startScan('strava')
+      if (!configured) {
+        setError('Strava n\'est pas configuré sur ce serveur : crée une app sur '
+          + 'strava.com/settings/api et renseigne STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET.')
+        return
+      }
+      window.location.href = '/api/strava/connect'
+    } catch (e) {
+      setBusy(false)
+      setError(String(e.message || e))
+    }
+  }
+
   const connectGarmin = async () => {
     setBusy(true)
     setError(null)
@@ -139,8 +173,16 @@ export default function Onboarding({ onDone }) {
           )}
           <div className="cta-zone">
             <button className="px-btn" disabled={busy} onClick={connectGarmin}>⌚ CONNECTER GARMIN</button>
+            <button className="px-btn" disabled={busy} onClick={connectStrava}
+              style={{ background: '#fc5200', boxShadow: '0 4px 0 #7a2800, 0 0 24px rgba(252,82,0,0.35)' }}>
+              🏃 CONNECTER STRAVA
+            </button>
             <button className="px-btn ghost" onClick={() => startScan('demo')}>MODE DÉMO (SANS COMPTE)</button>
           </div>
+          <p style={{ color: 'var(--ink-dim)', fontSize: 11, textAlign: 'center' }}>
+            Pas de montre Garmin ? Strava fonctionne avec Apple Watch, Polar,
+            Suunto, Coros… et même un simple téléphone.
+          </p>
         </>
       )}
 

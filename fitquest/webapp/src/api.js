@@ -35,4 +35,5 @@ export const api = {
   equip: (slot, itemId) =>
     reqStrict('/api/cosmetics/equip', { method: 'POST', body: JSON.stringify({ slot, itemId }) }),
   map: () => req('/api/map'),
+  stravaStatus: () => reqStrict('/api/strava/status'),
 }
