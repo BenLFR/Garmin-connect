@@ -1,21 +1,16 @@
-// Carte du Royaume — the REAL map (Strava-like): OSM tiles darkened to the
-// Néon Grimoire palette, your actual tracks, your position, and your past
-// routes pinned as re-runnable segment quests. The hex fog of war remains
-// as an optional overlay (it drives the "reveal new hexes" quests).
+// Carte du Royaume — exploration first: the REAL map (OSM), but hidden.
+// The world is dark; tiles are only revealed inside the hexes you have
+// actually run through. The frontier is half-glimpsed, weekly beacons
+// mark unexplored zones to go claim. Your city emerges as you run.
+// A toggle shows the full map (with past tracks & segment quests).
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
 import { SegBar } from '../components.jsx'
 
-const SQRT3 = Math.sqrt(3)
 const M_PER_DEG_LAT = 111320
-
-function visitColor(visits) {
-  if (visits >= 4) return '#2b8f7a'
-  if (visits >= 2) return '#1d5f63'
-  return '#16324a'
-}
+const NEIGHBOURS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
 
 // pointy-top hex corners around a (lat, lon) centre, radius in metres
 function hexCorners(lat, lon, radiusM) {
@@ -32,6 +27,8 @@ function hexCorners(lat, lon, radiusM) {
   return corners
 }
 
+function hexKeyToLatLon(h) { return [h.lat, h.lon] }
+
 const playerIcon = L.divIcon({
   className: 'player-marker',
   html: '<div class="player-dot"></div>',
@@ -39,13 +36,20 @@ const playerIcon = L.divIcon({
   iconAnchor: [9, 9],
 })
 
+const beaconIcon = L.divIcon({
+  className: 'beacon-marker',
+  html: '<div class="beacon-star">⭐</div>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 13],
+})
+
 export default function WorldMap() {
   const mapEl = useRef(null)
   const mapRef = useRef(null)
-  const fogLayerRef = useRef(null)
+  const layersRef = useRef({}) // { fog, frontier, history }
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  const [fog, setFog] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
     api.map().then(setData).catch((e) => setError(String(e.message || e)))
@@ -60,22 +64,85 @@ export default function WorldMap() {
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      className: 'grimoire-tiles', // CSS dark filter (styles.css)
+      className: 'grimoire-tiles',
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map)
 
-    // Past tracks — the territory you actually covered
-    data.tracks.forEach((t) => {
-      if (t.points.length > 1) {
-        L.polyline(t.points, { color: '#3ee6c1', weight: 3, opacity: 0.55 }).addTo(map)
-      }
+    const explored = data.hexes.filter((h) => h.lat != null)
+    const visitedKeys = new Set(explored.map((h) => `${h.q},${h.r}`))
+    const byKey = Object.fromEntries(explored.map((h) => [`${h.q},${h.r}`, h]))
+
+    // frontier: unexplored neighbours of explored hexes (positions derived
+    // from a neighbour's centre, offset in hex-space via the server radius)
+    const frontier = []
+    const seen = new Set()
+    explored.forEach((h) => {
+      NEIGHBOURS.forEach(([dq, dr]) => {
+        const key = `${h.q + dq},${h.r + dr}`
+        if (visitedKeys.has(key) || seen.has(key)) return
+        seen.add(key)
+        // approximate the neighbour centre from this hex's latlon
+        const R = data.hexRadiusM
+        const dx = R * Math.sqrt(3) * (dq + dr / 2)
+        const dy = R * 1.5 * dr
+        frontier.push({
+          lat: h.lat + dy / M_PER_DEG_LAT,
+          lon: h.lon + dx / (M_PER_DEG_LAT * Math.cos((h.lat * Math.PI) / 180)),
+        })
+      })
     })
 
-    // Segments — past routes as quests on the map
+    // -- FOG MASK: a world-sized polygon with holes on explored+frontier ----
+    const center = data.player
+      ? [data.player.lat, data.player.lon]
+      : explored.length ? hexKeyToLatLon(explored[0]) : [48.8566, 2.3522]
+    const span = 2.0 // degrees: "the rest of the world is night"
+    const outer = [
+      [center[0] - span, center[1] - span * 2],
+      [center[0] - span, center[1] + span * 2],
+      [center[0] + span, center[1] + span * 2],
+      [center[0] + span, center[1] - span * 2],
+    ]
+    const holes = [
+      ...explored.map((h) => hexCorners(h.lat, h.lon, data.hexRadiusM * 1.04)),
+      ...frontier.map((f) => hexCorners(f.lat, f.lon, data.hexRadiusM * 1.04)),
+    ]
+    const fog = L.polygon([outer, ...holes], {
+      stroke: false, fillColor: '#0b0e1a', fillOpacity: 0.94,
+      interactive: false,
+    })
+
+    // frontier stays veiled: map faintly visible, come and claim it
+    const frontierLayer = L.layerGroup(
+      frontier.map((f) =>
+        L.polygon(hexCorners(f.lat, f.lon, data.hexRadiusM * 1.0), {
+          color: '#1c2340', weight: 1,
+          fillColor: '#0b0e1a', fillOpacity: 0.62,
+          interactive: false,
+        })
+      )
+    )
+
+    // gold rim on hexes revealed this week — visible progress
+    const newThisWeek = L.layerGroup(
+      explored.filter((h) => h.newThisWeek).map((h) =>
+        L.polygon(hexCorners(h.lat, h.lon, data.hexRadiusM * 0.9), {
+          color: '#ffd166', weight: 1.5, fill: false, interactive: false,
+        })
+      )
+    )
+
+    // -- HISTORY LAYER (full-map mode): past tracks + segment quests --------
+    const historyItems = []
+    data.tracks.forEach((t) => {
+      if (t.points.length > 1) {
+        historyItems.push(L.polyline(t.points, { color: '#3ee6c1', weight: 3, opacity: 0.5 }))
+      }
+    })
     data.segments.forEach((seg) => {
       if (seg.points.length < 2) return
       const color = seg.doneThisWeek ? '#7ee881' : '#ffd166'
-      const line = L.polyline(seg.points, { color, weight: 5, opacity: 0.9 }).addTo(map)
+      const line = L.polyline(seg.points, { color, weight: 5, opacity: 0.9 })
       line.bindPopup(
         `<div class="seg-popup"><b>⚔️ ${seg.name}</b><br/>` +
         `${seg.distanceKm} km · couru le ${seg.date}<br/>` +
@@ -84,49 +151,44 @@ export default function WorldMap() {
           : '<span style="color:#ffd166">Quête : reparcours cet itinéraire</span>') +
         '</div>'
       )
+      historyItems.push(line)
+    })
+    const history = L.layerGroup(historyItems)
+
+    // -- beacons: weekly unexplored targets, always visible -----------------
+    ;(data.explorationTargets || []).forEach((t) => {
+      L.marker([t.lat, t.lon], { icon: beaconIcon })
+        .addTo(map)
+        .bindPopup('<div class="seg-popup"><b>⭐ Zone inexplorée</b><br/>' +
+          'Cours jusqu\'ici pour révéler la carte (quête Cartographe).</div>')
     })
 
-    // Player position — end of the latest track
     if (data.player) {
       L.marker([data.player.lat, data.player.lon], { icon: playerIcon })
         .addTo(map)
         .bindPopup('<b>Tu es ici</b> (fin de ta dernière sortie)')
     }
 
-    // Fog of war overlay (toggle) — the hexes behind the geo quests
-    const fogLayer = L.layerGroup(
-      data.hexes
-        .filter((h) => h.lat != null)
-        .map((h) =>
-          L.polygon(hexCorners(h.lat, h.lon, data.hexRadiusM * 0.96), {
-            color: h.newThisWeek ? '#ffd166' : '#0b0e1a',
-            weight: h.newThisWeek ? 2 : 1,
-            fillColor: visitColor(h.visits),
-            fillOpacity: 0.4,
-          })
-        )
-    )
-    fogLayerRef.current = fogLayer
+    layersRef.current = { fog, frontier: frontierLayer, newThisWeek, history }
+    fog.addTo(map)
+    frontierLayer.addTo(map)
+    newThisWeek.addTo(map)
 
-    const focus = data.player
-      ? [data.player.lat, data.player.lon]
-      : data.tracks.length
-        ? data.tracks[data.tracks.length - 1].points[0]
-        : data.origin
-          ? [data.origin.lat, data.origin.lon]
-          : [48.8566, 2.3522]
-    map.setView(focus, 13)
-
+    map.setView(center, 13)
     return () => { map.remove(); mapRef.current = null }
   }, [data])
 
+  // exploration mode ⇄ full map
   useEffect(() => {
     const map = mapRef.current
-    const layer = fogLayerRef.current
-    if (!map || !layer) return
-    if (fog) layer.addTo(map)
-    else layer.remove()
-  }, [fog])
+    const { fog, frontier, history } = layersRef.current
+    if (!map || !fog) return
+    if (showAll) {
+      fog.remove(); frontier.remove(); history.addTo(map)
+    } else {
+      history.remove(); fog.addTo(map); frontier.addTo(map)
+    }
+  }, [showAll])
 
   if (error) {
     return (
@@ -139,7 +201,6 @@ export default function WorldMap() {
   }
 
   const geoQuest = data?.geoQuests?.[0]
-  const pendingSegs = data?.segments?.filter((s) => !s.doneThisWeek).length || 0
 
   return (
     <div className="screen" style={{ position: 'relative', padding: 0, overflow: 'hidden' }}>
@@ -156,9 +217,9 @@ export default function WorldMap() {
         ) : (
           <>
             <div className="font-px" style={{ fontSize: 10, color: 'var(--ink)', marginBottom: 6 }}>
-              🗺️ CARTE DU ROYAUME
-              {data.segments.length > 0 && (
-                <span style={{ color: 'var(--gold)' }}> · {pendingSegs} segment{pendingSegs > 1 ? 's' : ''} à reparcourir</span>
+              🗺️ TERRES CONNUES : {data.hexes.length} hexagone{data.hexes.length > 1 ? 's' : ''}
+              {data.newHexesThisWeek > 0 && (
+                <span style={{ color: 'var(--gold)' }}> · +{data.newHexesThisWeek} cette semaine</span>
               )}
             </div>
             {geoQuest && (
@@ -170,20 +231,25 @@ export default function WorldMap() {
                 />
               </div>
             )}
+            {(data.explorationTargets || []).length > 0 && !showAll && (
+              <div style={{ marginBottom: 6 }}>
+                ⭐ {data.explorationTargets.length} zone{data.explorationTargets.length > 1 ? 's' : ''} inexplorée{data.explorationTargets.length > 1 ? 's' : ''} balisée{data.explorationTargets.length > 1 ? 's' : ''} cette semaine — cours jusqu'aux étoiles pour dissiper la nuit.
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <a
-                onClick={() => setFog(!fog)}
-                style={{ color: fog ? 'var(--neon-xp)' : 'var(--ink-dim)', textDecoration: 'underline', cursor: 'pointer' }}
+                onClick={() => setShowAll(!showAll)}
+                style={{ color: 'var(--neon-xp)', textDecoration: 'underline', cursor: 'pointer' }}
               >
-                {fog ? '🌫️ Voile d\'exploration : visible' : '🌫️ Afficher le voile d\'exploration'}
+                {showAll ? '🌫️ Revenir au mode exploration' : '🌍 Tout afficher (traces & segments)'}
               </a>
               {data.pendingActivities > 0 && (
                 <span>⏳ {data.pendingActivities} trace{data.pendingActivities > 1 ? 's' : ''} en déchiffrage</span>
               )}
               {data.demo && <span>Carte simulée (mode démo)</span>}
             </div>
-            {data.tracks.length === 0 && !data.pendingActivities && (
-              <div style={{ marginTop: 6 }}>Aucune trace GPS pour l'instant : sors courir, la carte naîtra de tes pas.</div>
+            {data.hexes.length === 0 && !data.pendingActivities && (
+              <div style={{ marginTop: 6 }}>Le monde entier est encore dans la nuit : sors courir, chaque sortie révèle la carte.</div>
             )}
           </>
         )}

@@ -301,3 +301,14 @@ h2.px { font-family: var(--px); font-size: 12px; letter-spacing: 1px; color: var
 }
 
 .map-hud { pointer-events: auto; }
+
+.beacon-marker .beacon-star {
+  font-size: 20px;
+  filter: drop-shadow(0 0 8px #ffd166);
+  animation: beacon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes beacon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+}

@@ -339,6 +339,15 @@ def get_map() -> Dict[str, Any]:
         and ("hasPolyline" not in a  # pre-GPS-mapping history: unknown → probe
              or a.get("hasPolyline") or a.get("startLatitude") is not None)
     )
+    targets = []
+    player_cell = geo_cache.player_hex(cache)
+    if player_cell and origin:
+        visited = {tuple(int(v) for v in key.split(","))
+                   for key in cache["hexes"]}
+        for q, r in geo.exploration_targets(
+                visited, (player_cell["q"], player_cell["r"]), seed=wk):
+            lat, lon = geo.hex_to_latlon(q, r, origin)
+            targets.append({"q": q, "r": r, "lat": lat, "lon": lon})
     return {
         "demo": st["mode"] == "demo",
         "hexRadiusM": geo.HEX_RADIUS_M,
@@ -347,6 +356,7 @@ def get_map() -> Dict[str, Any]:
         "tracks": tracks,
         "segments": segments.payload(cache, wk),
         "hexes": hexes,
+        "explorationTargets": targets,
         "pendingActivities": pending,
         "newHexesThisWeek": geo_cache.new_hexes_in_week(cache, wk),
         "geoQuests": [q for q in _quests_payload(st)

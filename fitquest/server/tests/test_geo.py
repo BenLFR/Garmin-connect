@@ -145,3 +145,23 @@ def test_simplify_track_keeps_endpoints():
     assert len(out) == 50
     assert out[0] == pts[0] and out[-1] == pts[-1]
     assert geo.simplify_track(pts[:10], max_points=50) == pts[:10]
+
+
+# -- exploration beacons ------------------------------------------------------------
+
+def test_exploration_targets_are_unexplored_and_in_range():
+    visited = {(q, r) for q in range(-3, 4) for r in range(-3, 4)}
+    targets = geo.exploration_targets(visited, (0, 0), seed="2026-W27")
+    assert len(targets) == 3
+    for t in targets:
+        assert t not in visited
+        assert 5 <= geo.hex_distance(t, (0, 0)) <= 8
+
+
+def test_exploration_targets_stable_within_week_change_across_weeks():
+    visited = {(0, 0)}
+    a = geo.exploration_targets(visited, (0, 0), seed="2026-W27")
+    b = geo.exploration_targets(visited, (0, 0), seed="2026-W27")
+    c = geo.exploration_targets(visited, (0, 0), seed="2026-W28")
+    assert a == b
+    assert a != c  # new beacons every week

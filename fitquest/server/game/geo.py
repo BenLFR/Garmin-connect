@@ -145,6 +145,33 @@ def simplify_track(points: List[Tuple[float, float]],
     return out
 
 
+def hex_distance(a: Tuple[int, int], b: Tuple[int, int]) -> int:
+    dq, dr = a[0] - b[0], a[1] - b[1]
+    return (abs(dq) + abs(dr) + abs(dq + dr)) // 2
+
+
+def exploration_targets(visited: set, player: Tuple[int, int], seed: str,
+                        count: int = 3, min_dist: int = 5,
+                        max_dist: int = 8) -> List[Tuple[int, int]]:
+    """Weekly beacons: unexplored hexes 5-8 hexes (~2-3.5 km) from the
+    player, stable within a week (seeded draw) — concrete real-world
+    targets that pull the player toward terra incognita."""
+    candidates = []
+    pq, pr = player
+    for dq in range(-max_dist, max_dist + 1):
+        for dr in range(-max_dist, max_dist + 1):
+            cand = (pq + dq, pr + dr)
+            if cand in visited:
+                continue
+            if min_dist <= hex_distance(cand, player) <= max_dist:
+                candidates.append(cand)
+    if not candidates:
+        return []
+    rng = random.Random(seed)
+    candidates.sort()  # deterministic base order before the seeded draw
+    return rng.sample(candidates, min(count, len(candidates)))
+
+
 # -- Demo fallback ---------------------------------------------------------------
 
 DEMO_ORIGIN = {"lat": 48.8566, "lon": 2.3522}
