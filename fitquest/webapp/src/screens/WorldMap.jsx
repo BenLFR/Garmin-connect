@@ -29,6 +29,71 @@ function hexCorners(lat, lon, radiusM) {
 
 function hexKeyToLatLon(h) { return [h.lat, h.lon] }
 
+// Canvas fog-of-war: one dark veil, clearings erased with composite
+// 'destination-out'. Unlike an SVG polygon-with-holes (where overlapping
+// holes re-fill under the evenodd rule), overlapping erases are invisible
+// by construction — no hex tiling ever shows.
+function makeFogLayer(explored, frontier, radiusM) {
+  const Fog = L.Layer.extend({
+    onAdd(map) {
+      this._map = map
+      this._canvas = L.DomUtil.create('canvas', 'fog-canvas')
+      this._canvas.style.pointerEvents = 'none'
+      map.getPanes().overlayPane.appendChild(this._canvas)
+      map.on('move zoom viewreset resize', this._redraw, this)
+      this._redraw()
+      return this
+    },
+    onRemove(map) {
+      map.off('move zoom viewreset resize', this._redraw, this)
+      L.DomUtil.remove(this._canvas)
+      return this
+    },
+    _tracePath(ctx, cells) {
+      const map = this._map
+      cells.forEach(({ lat, lon }) => {
+        const c = map.latLngToContainerPoint([lat, lon])
+        const edge = map.latLngToContainerPoint([
+          lat, lon + radiusM / (M_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180)),
+        ])
+        const rpx = Math.hypot(edge.x - c.x, edge.y - c.y) * 1.04
+        for (let i = 0; i < 6; i++) {
+          const a = ((60 * i - 30) * Math.PI) / 180
+          const x = c.x + rpx * Math.cos(a)
+          const y = c.y + rpx * Math.sin(a)
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)
+        }
+        ctx.closePath()
+      })
+    },
+    _redraw() {
+      const map = this._map
+      const size = map.getSize()
+      const canvas = this._canvas
+      canvas.width = size.x
+      canvas.height = size.y
+      L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = 'rgba(11, 14, 26, 0.94)'
+      ctx.fillRect(0, 0, size.x, size.y)
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.filter = 'blur(6px)' // soft clearing edges, organic look
+      ctx.beginPath()
+      this._tracePath(ctx, explored)
+      ctx.globalAlpha = 1
+      ctx.fill() // your territory: fully revealed
+      ctx.beginPath()
+      this._tracePath(ctx, frontier)
+      ctx.globalAlpha = 0.4
+      ctx.fill() // the frontier: half-glimpsed, come claim it
+      ctx.filter = 'none'
+      ctx.globalAlpha = 1
+      ctx.globalCompositeOperation = 'source-over'
+    },
+  })
+  return new Fog()
+}
+
 const playerIcon = L.divIcon({
   className: 'player-marker',
   html: '<div class="player-dot"></div>',
@@ -92,36 +157,11 @@ export default function WorldMap() {
       })
     })
 
-    // -- FOG MASK: a world-sized polygon with holes on explored+frontier ----
+    // -- FOG OF WAR: one canvas veil, clearings erased (no visible tiling) --
     const center = data.player
       ? [data.player.lat, data.player.lon]
       : explored.length ? hexKeyToLatLon(explored[0]) : [48.8566, 2.3522]
-    const span = 2.0 // degrees: "the rest of the world is night"
-    const outer = [
-      [center[0] - span, center[1] - span * 2],
-      [center[0] - span, center[1] + span * 2],
-      [center[0] + span, center[1] + span * 2],
-      [center[0] + span, center[1] - span * 2],
-    ]
-    const holes = [
-      ...explored.map((h) => hexCorners(h.lat, h.lon, data.hexRadiusM * 1.04)),
-      ...frontier.map((f) => hexCorners(f.lat, f.lon, data.hexRadiusM * 1.04)),
-    ]
-    const fog = L.polygon([outer, ...holes], {
-      stroke: false, fillColor: '#0b0e1a', fillOpacity: 0.94,
-      interactive: false,
-    })
-
-    // frontier stays veiled: map faintly visible, come and claim it
-    const frontierLayer = L.layerGroup(
-      frontier.map((f) =>
-        L.polygon(hexCorners(f.lat, f.lon, data.hexRadiusM * 1.0), {
-          color: '#1c2340', weight: 1,
-          fillColor: '#0b0e1a', fillOpacity: 0.62,
-          interactive: false,
-        })
-      )
-    )
+    const fog = makeFogLayer(explored, frontier, data.hexRadiusM)
 
     // gold rim on hexes revealed this week — visible progress
     const newThisWeek = L.layerGroup(
@@ -169,9 +209,8 @@ export default function WorldMap() {
         .bindPopup('<b>Tu es ici</b> (fin de ta dernière sortie)')
     }
 
-    layersRef.current = { fog, frontier: frontierLayer, newThisWeek, history }
+    layersRef.current = { fog, newThisWeek, history }
     fog.addTo(map)
-    frontierLayer.addTo(map)
     newThisWeek.addTo(map)
 
     map.setView(center, 13)
@@ -181,12 +220,12 @@ export default function WorldMap() {
   // exploration mode ⇄ full map
   useEffect(() => {
     const map = mapRef.current
-    const { fog, frontier, history } = layersRef.current
+    const { fog, history } = layersRef.current
     if (!map || !fog) return
     if (showAll) {
-      fog.remove(); frontier.remove(); history.addTo(map)
+      map.removeLayer(fog); history.addTo(map)
     } else {
-      history.remove(); fog.addTo(map); frontier.addTo(map)
+      history.remove(); map.addLayer(fog)
     }
   }, [showAll])
 
