@@ -7,7 +7,6 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional
 
 import garth
-from withings_sync import fit
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +349,10 @@ class Garmin:
         visceral_fat_rating: Optional[float] = None,
         bmi: Optional[float] = None,
     ):
+        # Lazy import: withings-sync is only needed for weight upload,
+        # don't make the whole package depend on it at import time.
+        from withings_sync import fit
+
         dt = datetime.fromisoformat(timestamp) if timestamp else datetime.now()
         fitEncoder = fit.FitEncoderWeight()
         fitEncoder.write_file_info()
@@ -774,6 +777,14 @@ class Garmin:
 
         url = f"{self.garmin_connect_hrv_url}/{cdate}"
         logger.debug("Requesting Heart Rate Variability (hrv) data")
+
+        return self.connectapi(url)
+
+    def get_hrv_data_by_date(self, startdate: str, enddate: str) -> Dict[str, Any]:
+        """Return daily hrv summaries between startdate and enddate using format 'YYYY-MM-DD'."""
+
+        url = f"{self.garmin_connect_hrv_url}/daily/{startdate}/{enddate}"
+        logger.debug("Requesting Heart Rate Variability (hrv) daily summaries")
 
         return self.connectapi(url)
 

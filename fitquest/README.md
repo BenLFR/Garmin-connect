@@ -1,0 +1,89 @@
+# ⚔️ FitQuest
+
+**Ton corps est ton personnage.** RPG pixel-art fantasy par-dessus les données
+Garmin Connect : chaque séance de sport rapporte de l'XP, fait monter de niveau
+et inflige des dégâts au boss du palier.
+
+| Docs | Contenu |
+|------|---------|
+| [`GAME_DESIGN.md`](GAME_DESIGN.md) | règles du jeu : classes, formule d'XP, niveaux, boss, feuille de perso |
+| [`UX_FLOWS.md`](UX_FLOWS.md) | écrans & parcours (patterns Duolingo / NRC / Strava / Game UI Database) |
+| [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) | design system « Néon Grimoire » : tokens, composants, animations |
+
+## Lancer l'app
+
+```bash
+# 1. Backend deps
+pip install -r server/requirements.txt
+
+# 2. Build du frontend (une fois)
+cd webapp && npm install && npm run build && cd ..
+
+# 3. Tout-en-un : FastAPI sert l'API + la webapp buildée
+cd server && uvicorn main:app --port 8000
+# → http://localhost:8000
+```
+
+Mode dev frontend avec hot-reload : `cd webapp && npm run dev` (proxy `/api`
+vers `:8000`).
+
+## Modes de données
+
+- **Démo** (défaut) : historique simulé de 4 semaines, aucun compte requis.
+  Le CTA « Simuler une séance » alimente la boucle de jeu.
+- **Garmin réel** : utilise la lib `garminconnect` de ce repo.
+
+  ```bash
+  pip install garth requests            # deps de la lib
+  cd server && python garmin_login.py   # login (+ MFA), tokens ~1 an,
+                                        # et rapport de couverture des champs
+  uvicorn main:app --port 8000          # puis « Connecter Garmin » à l'onboarding
+  ```
+
+  Les tokens vont dans `$GARMINTOKENS` (défaut `~/.garminconnect`) ; aucun mot
+  de passe n'est stocké. NB : `sso.garmin.com` et `connectapi.garmin.com`
+  doivent être joignables (bloqués par défaut par la politique réseau des
+  environnements Claude Code web). Le login se fait aussi **dans l'app**
+  (onboarding → Connecter Garmin : email, mot de passe, code MFA).
+
+- **Strava** : pour tous ceux qui n'ont pas de Garmin (Apple Watch, Polar,
+  Suunto, Coros, ou juste un téléphone). Une fois : créer une app API sur
+  <https://www.strava.com/settings/api> (Authorization Callback Domain :
+  `localhost`), puis lancer le serveur avec les identifiants :
+
+  ```bash
+  STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... uvicorn main:app --port 8000
+  # (ou data/strava_app.json : {"clientId": ..., "clientSecret": ...})
+  ```
+
+  Onboarding → « Connecter Strava » → OAuth dans le navigateur → retour
+  automatique dans l'app. Limites assumées : pas de HRV/sommeil côté Strava
+  (Vitalité neutre) et le load utilise le Relative Effort ou un proxy TRIMP.
+
+## Tests
+
+```bash
+cd server && python -m pytest tests/        # règles du moteur (15 tests)
+cd webapp && node e2e.mjs                   # parcours complet navigateur
+# (e2e.mjs nécessite le serveur lancé sur :8000 et un profil vierge :
+#  curl -X POST localhost:8000/api/reset)
+```
+
+## Architecture
+
+```
+fitquest/
+├── server/            FastAPI
+│   ├── main.py        API (onboarding, state, sync) + sert webapp/dist
+│   └── game/
+│       ├── engine.py          moteur : XP, niveaux, classes, reco, stats, boss
+│       ├── quests.py          défis hebdo, guilde, world boss (phase 2)
+│       ├── demo_data.py       provider démo (historique simulé)
+│       ├── garmin_provider.py provider réel (lib garminconnect)
+│       └── state.py           persistance JSON (MVP mono-joueur)
+└── webapp/            React + Vite, pixel art « Néon Grimoire »
+    └── src/
+        ├── screens/   Onboarding S0→S5, Taverne, Héros, Quêtes, Journal
+        ├── sprites.jsx     sprites 16×16 (5 classes + boss) en SVG
+        └── components.jsx  XPBar segmentée, LevelUpModal, FloatingXP…
+```
